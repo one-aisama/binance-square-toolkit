@@ -1,4 +1,4 @@
-"""Fetch market data from Binance public API."""
+"""Fetch market data from Binance and CoinGecko public APIs."""
 
 import asyncio
 import logging
@@ -9,6 +9,7 @@ import httpx
 logger = logging.getLogger("bsq.content")
 
 TICKER_24H = "https://api.binance.com/api/v3/ticker/24hr"
+COINGECKO_MARKETS = "https://api.coingecko.com/api/v3/coins/markets"
 
 
 async def get_market_data(symbols: list[str]) -> dict[str, dict[str, Any]]:
@@ -42,3 +43,43 @@ async def _fetch_ticker(client: httpx.AsyncClient, symbol: str) -> dict[str, Any
         "change_24h": float(data["priceChangePercent"]),
         "volume": float(data["volume"]),
     }
+
+
+async def get_trending_coins(limit: int = 10) -> list[dict[str, Any]]:
+    """Get top coins by market cap with 24h change from CoinGecko.
+
+    No API key required.
+
+    Args:
+        limit: Number of coins to return. Default: 10
+
+    Returns:
+        List of dicts: [{rank, symbol, name, price, change_24h, market_cap, volume_24h}]
+        Sorted by market cap rank (BTC first).
+    """
+    params = {
+        "vs_currency": "usd",
+        "order": "market_cap_desc",
+        "per_page": limit,
+        "page": 1,
+        "sparkline": "false",
+        "price_change_percentage": "24h",
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(COINGECKO_MARKETS, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+
+    results = []
+    for i, coin in enumerate(data, start=1):
+        results.append({
+            "rank": i,
+            "symbol": coin["symbol"].upper(),
+            "name": coin["name"],
+            "price": coin["current_price"],
+            "change_24h": coin.get("price_change_percentage_24h") or 0.0,
+            "market_cap": coin["market_cap"],
+            "volume_24h": coin["total_volume"],
+        })
+    logger.info(f"Fetched {len(results)} trending coins from CoinGecko")
+    return results

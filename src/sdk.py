@@ -28,7 +28,9 @@ from src.session.browser_actions import (
     repost,
     follow_author,
 )
-from src.content.market_data import get_market_data
+from src.content.market_data import get_market_data, get_trending_coins
+from src.content.news import get_crypto_news, get_article_content
+from src.content.technical_analysis import get_ta_summary
 
 logger = logging.getLogger("bsq.sdk")
 
@@ -99,6 +101,63 @@ class BinanceSquareSDK:
         """
         ws = self._require_connection()
         return await collect_feed_posts(ws, count=count, tab=tab)
+
+    async def get_trending_coins(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Get top coins by market cap with 24h change from CoinGecko.
+
+        No browser needed. No API key required.
+
+        Args:
+            limit: Number of coins to return. Default: 10
+
+        Returns:
+            [{rank, symbol, name, price, change_24h, market_cap, volume_24h}]
+        """
+        return await get_trending_coins(limit)
+
+    async def get_crypto_news(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Fetch latest crypto news headlines from RSS feeds.
+
+        No browser needed. Sources: CoinDesk, CoinTelegraph, Decrypt.
+
+        Args:
+            limit: Number of articles to return. Default: 10
+
+        Returns:
+            [{title, source, url, published_at}] sorted newest first
+        """
+        return await get_crypto_news(limit)
+
+    async def get_article_content(self, url: str) -> dict[str, Any]:
+        """Fetch full text of a news article.
+
+        Call this when a headline from get_crypto_news() is interesting
+        enough to write a deep post or article about.
+
+        Args:
+            url: Article URL from get_crypto_news()
+
+        Returns:
+            {title, text, url, published_at}
+        """
+        return await get_article_content(url)
+
+    async def get_ta_summary(self, symbol: str = "BTC", timeframe: str = "1D") -> dict[str, Any]:
+        """Compute technical analysis summary for a trading pair.
+
+        Fetches 200 candles from Binance and computes key indicators.
+        Agent uses this as a basis for forming its own market view.
+
+        Args:
+            symbol: Coin symbol, e.g. "BTC", "ETH", "SOL"
+            timeframe: "1H", "4H", "1D" (default), "1W"
+
+        Returns:
+            {symbol, timeframe, price, change_pct, trend, signal,
+             rsi, rsi_zone, macd, macd_signal, macd_cross,
+             ma20, ma50, ma200, price_vs_ma200, support, resistance}
+        """
+        return await get_ta_summary(symbol, timeframe)
 
     async def get_market_data(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
         """Get current price, 24h change, volume for coins.
