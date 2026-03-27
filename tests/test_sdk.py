@@ -156,16 +156,36 @@ async def test_create_post_calls_browser_action(sdk):
     sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
     mock_result = {"success": True, "post_id": "456", "response": {}}
 
+    post_text = (
+        "$BTC looking strong on the daily chart. RSI at 62, MACD crossing up.\n\n"
+        "watching 72k resistance. if it breaks with volume, could push to ATH. #Bitcoin"
+    )
     with patch("src.sdk.create_post", new_callable=AsyncMock, return_value=mock_result) as mock_fn:
-        result = await sdk.create_post(text="$BTC looking strong", coin="BTC", sentiment="bullish")
+        result = await sdk.create_post(text=post_text, coin="BTC", sentiment="bullish")
 
     mock_fn.assert_called_once_with(
         "ws://127.0.0.1:9222/devtools/browser/abc",
-        "$BTC looking strong",
+        post_text,
         coin="BTC",
         sentiment="bullish",
         image_path=None,
     )
+    assert result["success"] is True
+
+
+async def test_create_post_validation_rejects_short_text(sdk):
+    sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
+    result = await sdk.create_post(text="$BTC up", coin="BTC")
+    assert result["success"] is False
+    assert "validation_errors" in result
+
+
+async def test_create_post_skip_validation(sdk):
+    sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
+    mock_result = {"success": True, "post_id": "789", "response": {}}
+
+    with patch("src.sdk.create_post", new_callable=AsyncMock, return_value=mock_result) as mock_fn:
+        result = await sdk.create_post(text="short", skip_validation=True)
     assert result["success"] is True
 
 

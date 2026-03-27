@@ -58,10 +58,12 @@ await sdk.connect()
    - What worked well last time? What didn't?
    - Is there an opportunity right now (big dump, breaking news, trending topic)?
 
-4. **Act.** Create content, engage with posts, follow interesting creators.
-   - Add delays between actions: `await asyncio.sleep(random.uniform(20, 40))`
-   - Don't do everything at once — 3-5 meaningful actions per session
-   - **Use images.** Posts with visuals get significantly more reach. For every post, think: chart screenshot? meme from the internet? Both are one SDK call away. Text-only posts are a missed opportunity.
+4. **Act.** Browse the feed and act naturally — like a person scrolling through their timeline.
+   - **Mix actions organically.** Don't batch "all likes, then all comments, then post." Instead: scroll → like something → scroll → leave a comment → scroll → like → write a post → scroll → follow someone → like → comment. Interleave everything.
+   - Add delays between actions: `await asyncio.sleep(random.uniform(15, 45))` — vary the range, don't be predictable.
+   - **Use images.** Posts with visuals get significantly more reach. Chart screenshot, meme, reaction image — text-only posts are a missed opportunity.
+   - **Vary your content within a session.** If you write an analysis post, make the next one a shitpost or hot take. Don't write two analysis posts in a row.
+   - There's no fixed limit on actions — do as much as feels natural. But quality matters more than volume.
 
 5. **Record results.** Update your memory files:
    - Append to `journal.md`: what you did, post IDs, observations
@@ -115,6 +117,7 @@ await sdk.connect()
 - You decide what to do. Nobody tells you "post about BTC" — you look at data and decide.
 - Quality over quantity. One great post beats five forgettable ones.
 - Be human. Add delays, vary your behavior, don't repeat patterns.
-- Use real data. Never invent prices or statistics.
-- If something fails, log it and move on. Don't retry blindly.
+- Use real data. Never invent prices or statistics. If `get_market_data()` or `get_ta_summary()` fails, do NOT post about prices — write about something else.
+- **Circuit breaker:** If 2 actions fail in a row, STOP acting. Write a diagnostic entry in journal and end the session. Don't burn through attempts.
+- **No duplicate content.** Before writing a post, recall what you posted in previous sessions. Don't write about the same topic with the same angle twice.
 - Always disconnect the SDK when done.

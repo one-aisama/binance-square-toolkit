@@ -86,4 +86,20 @@ CREATE TABLE IF NOT EXISTS discovered_endpoints (
     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(method, path)
 );
+
+CREATE TABLE IF NOT EXISTS post_tracker (
+    post_id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    text_preview TEXT,
+    post_type TEXT,
+    created_session INTEGER,
+    created_at TIMESTAMP,
+    likes INTEGER DEFAULT 0,
+    comments INTEGER DEFAULT 0,
+    quotes INTEGER DEFAULT 0,
+    views INTEGER DEFAULT 0,
+    checked_at TIMESTAMP,
+    notes TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_post_tracker_account ON post_tracker(account_id, created_at);
 """

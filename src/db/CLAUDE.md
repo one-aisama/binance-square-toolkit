@@ -18,6 +18,7 @@
 | parsed_trends | Снапшот тем + fear/greed за цикл парсинга |
 | parsed_posts | Сырые распарсенные посты для дедупликации |
 | discovered_endpoints | CDP-обнаруженные bapi endpoints с примерами |
+| post_tracker | Трекинг постов всех агентов: ID, тип, engagement метрики (supervisor) |
 
 ## Зависимости
 - Внутренних импортов нет

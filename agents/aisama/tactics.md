@@ -52,3 +52,11 @@
 - **Feed has lots of spam to filter.** Posts under 50 chars, "click here to trade", giveaway spam — skip these. Look for substantive posts with 15+ likes.
 - **Dollar signs in post text need escaping in Python strings.** Use `\$BTC` in f-strings or raw strings to avoid issues.
 - **Comments on mid-popularity posts (15-30 likes) go through cleanly.** No Follow & Reply popup encountered. Good sweet spot for visibility without gatekeeping.
+
+### Session 2 (2026-03-28)
+- **New accounts need comments more than posts.** Session 1 posts got 0 engagement with 0 followers. Posts are invisible without distribution. Comments on popular posts (50-150 likes) are the real growth engine — people see your comment, visit profile, follow.
+- **Always attach images to posts.** Chart screenshots for analysis, memes for commentary. The ETH 4H chart and "this is fine" meme both worked seamlessly. `sdk.screenshot_chart()` and `sdk.download_image()` are reliable.
+- **Feed is polluted with campaign spam.** SIGN token promo and generic Web3 identity posts flood recommended feed. Skip these — look for real market discussion posts.
+- **Data-backed contrarian comments stand out.** Instead of "I'd buy SOL!" on a "$20K which coin" post, dropping real TA data (MACD bearish cross, 42% below MA200) with a "wait for bottom" take is memorable and differentiated.
+- **Consecutive red days = good content opportunity.** Day 2 of bleeding lets you reference trends ("second day testing support") rather than reacting to a single move. More analytical credibility.
+- **Meme downloads work for mood posts.** imgflip URLs work with `sdk.download_image()`. Good source for relatable market memes.

@@ -34,6 +34,7 @@ from src.session.browser_actions import (
 from src.content.market_data import get_market_data, get_trending_coins
 from src.content.news import get_crypto_news, get_article_content
 from src.content.technical_analysis import get_ta_summary
+from src.content.validator import validate_post, validate_comment, validate_article, validate_quote
 
 logger = logging.getLogger("bsq.sdk")
 
@@ -217,14 +218,28 @@ class BinanceSquareSDK:
 
     # ---- Actions ----
 
-    async def comment_on_post(self, post_id: str, text: str) -> dict[str, Any]:
+    async def comment_on_post(
+        self, post_id: str, text: str, skip_validation: bool = False,
+    ) -> dict[str, Any]:
         """Post a comment on a specific post.
 
-        Handles Follow & Reply popup if author restricts comments.
+        Validates comment text before posting. Handles Follow & Reply popup.
 
         Returns:
-            {success, post_id, followed}
+            {success, post_id, followed} or {success: False, validation_errors}
         """
+        if not skip_validation:
+            result = validate_comment(text)
+            if not result.valid:
+                logger.warning(f"comment_on_post: validation failed — {result.errors}")
+                return {
+                    "success": False,
+                    "validation_errors": result.errors,
+                    "validation_warnings": result.warnings,
+                }
+            if result.warnings:
+                logger.info(f"comment_on_post: validation warnings — {result.warnings}")
+
         ws = self._require_connection()
         return await comment_on_post(ws, post_id, text)
 
@@ -234,18 +249,36 @@ class BinanceSquareSDK:
         coin: str | None = None,
         sentiment: str | None = None,
         image_path: str | None = None,
+        recent_posts: list[str] | None = None,
+        skip_validation: bool = False,
     ) -> dict[str, Any]:
         """Create a new post on Binance Square.
+
+        Validates content before publishing. Pass skip_validation=True to bypass.
 
         Args:
             text: Post text (use $BTC style for coins, include #hashtags)
             coin: Optional coin ticker to attach chart (e.g. "BTC")
             sentiment: Optional "bullish" or "bearish"
             image_path: Optional local file path for image
+            recent_posts: Optional list of recent post texts for duplicate check
+            skip_validation: Skip content validation (default False)
 
         Returns:
-            {success, post_id, response}
+            {success, post_id, response} or {success: False, validation_errors, validation_warnings}
         """
+        if not skip_validation:
+            result = validate_post(text, recent_posts=recent_posts)
+            if not result.valid:
+                logger.warning(f"create_post: validation failed — {result.errors}")
+                return {
+                    "success": False,
+                    "validation_errors": result.errors,
+                    "validation_warnings": result.warnings,
+                }
+            if result.warnings:
+                logger.info(f"create_post: validation warnings — {result.warnings}")
+
         ws = self._require_connection()
         return await create_post(ws, text, coin=coin, sentiment=sentiment, image_path=image_path)
 
@@ -254,21 +287,50 @@ class BinanceSquareSDK:
         title: str,
         body: str,
         cover_path: str | None = None,
+        skip_validation: bool = False,
     ) -> dict[str, Any]:
         """Create a long-form article on Binance Square.
 
+        Validates content before publishing. Pass skip_validation=True to bypass.
+
         Returns:
-            {success, post_id, response}
+            {success, post_id, response} or {success: False, validation_errors, validation_warnings}
         """
+        if not skip_validation:
+            result = validate_article(title, body)
+            if not result.valid:
+                logger.warning(f"create_article: validation failed — {result.errors}")
+                return {
+                    "success": False,
+                    "validation_errors": result.errors,
+                    "validation_warnings": result.warnings,
+                }
+            if result.warnings:
+                logger.info(f"create_article: validation warnings — {result.warnings}")
+
         ws = self._require_connection()
         return await create_article(ws, title, body, cover_path=cover_path)
 
-    async def quote_repost(self, post_id: str, comment: str = "") -> dict[str, Any]:
+    async def quote_repost(
+        self, post_id: str, comment: str = "", skip_validation: bool = False,
+    ) -> dict[str, Any]:
         """Quote-repost a post with optional comment.
 
+        Validates quote comment before publishing if comment is non-empty.
+
         Returns:
-            {success, original_post_id}
+            {success, original_post_id} or {success: False, validation_errors}
         """
+        if comment and not skip_validation:
+            result = validate_quote(comment)
+            if not result.valid:
+                logger.warning(f"quote_repost: validation failed — {result.errors}")
+                return {
+                    "success": False,
+                    "validation_errors": result.errors,
+                    "validation_warnings": result.warnings,
+                }
+
         ws = self._require_connection()
         return await repost(ws, post_id, comment=comment)
 

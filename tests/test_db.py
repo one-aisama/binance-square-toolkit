@@ -45,7 +45,7 @@ async def test_init_db_idempotent(tmp_path):
         )
         count = (await cursor.fetchone())[0]
 
-    assert count == 7
+    assert count == 8
 
 
 async def test_init_db_creates_indexes(tmp_path):

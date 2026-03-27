@@ -8,6 +8,9 @@
 | generator.py | 125 | ContentGenerator — инструмент агента: строит промпт по персоне, вызывает Claude/OpenAI API |
 | publisher.py | 88 | ContentPublisher — очередь контента в SQLite: добавить, получить pending, пометить published/failed |
 | market_data.py | 45 | get_market_data(symbols) — цены + 24h изменение из Binance public API |
+| validator.py | 250 | validate_post/comment/article/quote — banned phrases (из YAML), дубликаты, структура |
+| technical_analysis.py | ~100 | get_ta_summary(symbol, timeframe) — RSI, MACD, MAs, support/resistance |
+| news.py | ~80 | get_crypto_news(limit), get_article_content(url) — RSS новости + парсинг статей |
 
 ## Зависимости
 - Использует: `bapi.client` (ContentPublisher вызывает BapiClient.create_post — заглушка)
