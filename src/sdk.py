@@ -27,6 +27,7 @@ from src.session.browser_actions import (
     create_article,
     repost,
     follow_author,
+    get_user_profile,
 )
 from src.content.market_data import get_market_data, get_trending_coins
 from src.content.news import get_crypto_news, get_article_content
@@ -92,7 +93,23 @@ class BinanceSquareSDK:
             raise SDKError("Not connected. Call sdk.connect() first.")
         return self._ws_endpoint
 
-    # ---- Data: Feed & Trends ----
+    # ---- Data: Feed, Profiles & Trends ----
+
+    async def get_user_profile(self, username: str) -> dict[str, Any]:
+        """Fetch public profile data for a Binance Square user.
+
+        Agent uses this to research influencers, check competitors,
+        or monitor own profile growth.
+
+        Args:
+            username: Binance Square username (from profile URL)
+
+        Returns:
+            {username, name, bio, handle, following, followers, liked, shared,
+             is_following, recent_posts: [{post_id, text_preview}]}
+        """
+        ws = self._require_connection()
+        return await get_user_profile(ws, username)
 
     async def get_feed_posts(self, count: int = 20, tab: str = "recommended") -> list[dict[str, Any]]:
         """Get posts from feed for agent to review and decide on.

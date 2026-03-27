@@ -15,7 +15,7 @@ from src.session import page_map
 
 logger = logging.getLogger("bsq.session")
 
-# Spam keywords to skip when browsing feed
+
 
 
 async def _get_page(ws_endpoint: str) -> tuple:
@@ -597,5 +597,119 @@ async def collect_feed_posts(
     except Exception as e:
         logger.error(f"Feed collection failed: {e}")
         return results
+    finally:
+        await pw.stop()
+
+
+async def get_user_profile(ws_endpoint: str, username: str) -> dict[str, Any]:
+    """Fetch public profile data for a Binance Square user.
+
+    Args:
+        ws_endpoint: CDP websocket endpoint
+        username: Binance Square username (from profile URL)
+
+    Returns:
+        {username, name, bio, following, followers, liked, shared,
+         is_following, recent_posts: [{post_id, text_preview}]}
+    """
+    pw, browser, page = await _get_page(ws_endpoint)
+
+    try:
+        url = f"https://www.binance.com/en/square/profile/{username}"
+        await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        await asyncio.sleep(5)
+
+        profile = await page.evaluate(r'''(username) => {
+            const result = {username: username};
+            const lines = document.body.innerText.split('\n').map(l => l.trim()).filter(l => l);
+
+            // Find name — usually first substantial text or h1
+            const h1 = document.querySelector('h1');
+            result.name = h1 ? h1.innerText.trim() : '';
+
+            // Parse stats by finding label positions
+            const labelMap = {};
+            for (let i = 0; i < lines.length; i++) {
+                const l = lines[i];
+                if (['Following', 'Followers', 'Liked', 'Shared', 'Posts'].includes(l)) {
+                    labelMap[l] = i;
+                }
+            }
+
+            // Number before "Following" = following count
+            if (labelMap['Following'] !== undefined) {
+                result.following = lines[labelMap['Following'] - 1] || '0';
+            }
+
+            // Number before "Followers" = followers count (line between Following and Followers)
+            if (labelMap['Followers'] !== undefined) {
+                result.followers = lines[labelMap['Followers'] - 1] || '0';
+            }
+
+            // Number before "Liked"
+            if (labelMap['Liked'] !== undefined) {
+                result.liked = lines[labelMap['Liked'] - 1] || '0';
+            }
+
+            // Number before "Shared"
+            if (labelMap['Shared'] !== undefined) {
+                result.shared = lines[labelMap['Shared'] - 1] || '0';
+            }
+
+            // Bio: look for description text between name area and stats
+            // Usually a line with @ mention before Following count
+            const followingIdx = labelMap['Following'] || 20;
+            for (let i = 2; i < followingIdx - 1; i++) {
+                const line = lines[i];
+                if (line.startsWith('@')) {
+                    result.handle = line;
+                } else if (line.length > 30 && !line.startsWith('http') &&
+                           line !== result.name && !line.startsWith('@')) {
+                    result.bio = (result.bio || '') + line + ' ';
+                }
+            }
+            result.bio = (result.bio || '').trim();
+
+            // Follow button state
+            const btns = document.querySelectorAll('button');
+            result.is_following = false;
+            for (const btn of btns) {
+                const t = btn.innerText.trim();
+                if (t === 'Following' || t === 'Unfollow') {
+                    result.is_following = true;
+                    break;
+                }
+            }
+
+            // Recent post IDs
+            const postLinks = document.querySelectorAll('a[href*="/square/post/"]');
+            const seen = new Set();
+            result.recent_posts = [];
+            postLinks.forEach(a => {
+                const href = a.getAttribute('href') || '';
+                const parts = href.split('/');
+                const id = parts[parts.length - 1];
+                if (id && /^\d+$/.test(id) && !seen.has(id)) {
+                    seen.add(id);
+                    // Get nearby text as preview
+                    const parent = a.closest('div');
+                    const preview = parent ? parent.innerText.substring(0, 100).trim() : '';
+                    result.recent_posts.push({post_id: id, text_preview: preview});
+                }
+            });
+
+            return result;
+        }''', username)
+
+        logger.info(
+            f"Profile fetched: {profile.get('name', username)}, "
+            f"followers={profile.get('followers', '?')}, "
+            f"posts={len(profile.get('recent_posts', []))}"
+        )
+        return profile
+
+    except Exception as e:
+        logger.error(f"get_user_profile: {e}, username={username}")
+        return {"username": username, "error": str(e)}
     finally:
         await pw.stop()
