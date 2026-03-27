@@ -80,6 +80,50 @@ Get current prices from Binance public API. No browser needed.
 }
 ```
 
+### `sdk.get_user_profile(username)`
+Fetch public profile data for any Binance Square user.
+
+**Parameters:**
+- `username` (str): Username from profile URL
+
+**Returns:** `dict`
+```python
+{
+    "username": "CZ", "name": "CZ", "handle": "@Binance co-founder...",
+    "bio": "...", "following": "27", "followers": "1.8M+",
+    "liked": "301.6K+", "shared": "12.9K+", "is_following": False,
+    "recent_posts": [{"post_id": "305942...", "text_preview": "Not owned..."}]
+}
+```
+
+### `sdk.get_post_stats(post_id)`
+Fetch engagement stats for a specific post.
+
+**Parameters:**
+- `post_id` (str): Post ID
+
+**Returns:** `dict`
+```python
+{"post_id": "306032...", "likes": "1", "comments": "0", "quotes": "0",
+ "title_preview": "me watching my portfolio..."}
+```
+
+### `sdk.get_my_stats()`
+Fetch own profile stats from Creator Center. No parameters — uses connected profile.
+
+**Returns:** `dict`
+```python
+{
+    "username": "aisama", "handle": "@aisama", "name": "aisama",
+    "followers": "3", "following": "10", "liked": "26", "shared": "0",
+    "dashboard": {
+        "period": "Period: 2026-03-26...",
+        "published": "3", "followers_gained": "0",
+        "views": "106", "likes": "2", "shares": "0"
+    }
+}
+```
+
 ### `sdk.get_trending_coins(limit=10)`
 Get top coins by market cap with 24h stats from CoinGecko. No browser, no API key.
 
