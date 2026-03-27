@@ -69,7 +69,16 @@
       "Bash(ls -la config/*.png config/*.jpg)",
       "Bash(find . -maxdepth 2 -name *.png -o -name *.jpg -o -name *.jpeg)",
       "WebSearch",
-      "Bash(python -m pytest tests/ -v --ignore=tests/test_harvester_integration.py -q)"
+      "Bash(python -m pytest tests/ -v --ignore=tests/test_harvester_integration.py -q)",
+      "Bash(python -m pytest tests/test_content.py -v -q)",
+      "Bash(python -m pytest tests/test_news.py -v)",
+      "Bash(python -m pytest tests/test_technical_analysis.py -v)",
+      "WebFetch(domain:www.binance.com)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(timeout 30)",
+      "Bash(python -m pytest tests/test_content_validator.py -v)",
+      "Bash(python -m pytest tests/ -v --ignore=tests/test_harvester_integration.py --tb=short)",
+      "Bash(python -m pytest tests/test_content_validator.py -v --tb=short)"
     ]
   }
 }
