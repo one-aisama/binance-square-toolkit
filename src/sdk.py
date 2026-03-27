@@ -28,6 +28,8 @@ from src.session.browser_actions import (
     repost,
     follow_author,
     get_user_profile,
+    get_post_stats,
+    get_my_stats,
 )
 from src.content.market_data import get_market_data, get_trending_coins
 from src.content.news import get_crypto_news, get_article_content
@@ -110,6 +112,32 @@ class BinanceSquareSDK:
         """
         ws = self._require_connection()
         return await get_user_profile(ws, username)
+
+    async def get_post_stats(self, post_id: str) -> dict[str, Any]:
+        """Fetch engagement stats for a specific post.
+
+        Agent uses this to check how own posts performed.
+
+        Args:
+            post_id: Post ID
+
+        Returns:
+            {post_id, likes, comments, quotes, title_preview}
+        """
+        ws = self._require_connection()
+        return await get_post_stats(ws, post_id)
+
+    async def get_my_stats(self) -> dict[str, Any]:
+        """Fetch own profile stats from Creator Center.
+
+        Agent uses this to monitor growth and adapt strategy.
+
+        Returns:
+            {username, handle, name, bio, followers, following, liked, shared,
+             dashboard: {period, published, followers_gained, views, likes, comments, shares, quotes}}
+        """
+        ws = self._require_connection()
+        return await get_my_stats(ws)
 
     async def get_feed_posts(self, count: int = 20, tab: str = "recommended") -> list[dict[str, Any]]:
         """Get posts from feed for agent to review and decide on.

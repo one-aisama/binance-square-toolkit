@@ -713,3 +713,148 @@ async def get_user_profile(ws_endpoint: str, username: str) -> dict[str, Any]:
         return {"username": username, "error": str(e)}
     finally:
         await pw.stop()
+
+
+async def get_post_stats(ws_endpoint: str, post_id: str) -> dict[str, Any]:
+    """Fetch engagement stats for a specific post.
+
+    Args:
+        ws_endpoint: CDP websocket endpoint
+        post_id: Post ID
+
+    Returns:
+        {post_id, likes, comments, quotes, title_preview}
+    """
+    pw, browser, page = await _get_page(ws_endpoint)
+
+    try:
+        url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
+        await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        await asyncio.sleep(5)
+
+        stats = await page.evaluate(r'''(postId) => {
+            const result = {post_id: postId};
+
+            // Like count from thumb-up-button
+            const likeBtn = document.querySelector('div.thumb-up-button');
+            result.likes = likeBtn ? likeBtn.innerText.trim() : '0';
+
+            // Quote count from detail-quote-button
+            const quoteBtn = document.querySelector('div.detail-quote-button');
+            result.quotes = quoteBtn ? quoteBtn.innerText.trim() : '0';
+
+            // Comment count from "Replies N" text
+            const lines = document.body.innerText.split('\n').map(l => l.trim());
+            for (const line of lines) {
+                const match = line.match(/^Replies?\s+(\d[\d,.KkMm]*)/);
+                if (match) {
+                    result.comments = match[1];
+                    break;
+                }
+            }
+            if (!result.comments) result.comments = '0';
+
+            // Title/text preview
+            const content = document.querySelector('.richtext-container');
+            result.title_preview = content
+                ? content.innerText.trim().substring(0, 120)
+                : '';
+
+            return result;
+        }''', post_id)
+
+        logger.info(f"Post stats {post_id}: likes={stats.get('likes')}, comments={stats.get('comments')}")
+        return stats
+
+    except Exception as e:
+        logger.error(f"get_post_stats: {e}, post_id={post_id}")
+        return {"post_id": post_id, "error": str(e)}
+    finally:
+        await pw.stop()
+
+
+async def get_my_stats(ws_endpoint: str) -> dict[str, Any]:
+    """Fetch own profile stats from Creator Center.
+
+    Returns:
+        {username, handle, bio, followers, following, liked, shared,
+         dashboard: {period, published, followers_gained, views, likes}}
+    """
+    pw, browser, page = await _get_page(ws_endpoint)
+
+    try:
+        await page.goto(
+            page_map.CREATOR_CENTER_URL,
+            wait_until="domcontentloaded",
+            timeout=60_000,
+        )
+        await asyncio.sleep(6)
+
+        stats = await page.evaluate(r'''() => {
+            const result = {};
+            const lines = document.body.innerText.split('\n').map(l => l.trim()).filter(l => l);
+
+            // Username and handle — first lines after nav
+            for (let i = 0; i < Math.min(lines.length, 20); i++) {
+                if (lines[i].startsWith('@')) {
+                    result.handle = lines[i];
+                    result.username = lines[i].replace('@', '');
+                    // Name is line before handle
+                    if (i > 0) result.name = lines[i - 1];
+                    // Bio is line after handle
+                    // Bio: skip known UI labels
+                    const skipLabels = ['Following', 'Followers', 'Create API Key',
+                                        'Creator Dashboard', 'Liked', 'Shared'];
+                    if (i + 1 < lines.length && lines[i + 1].length > 10
+                        && !skipLabels.includes(lines[i + 1])) {
+                        result.bio = lines[i + 1];
+                    }
+                    break;
+                }
+            }
+
+            // Profile stats: Following, Followers, Liked, Shared
+            const labelMap = {};
+            for (let i = 0; i < lines.length; i++) {
+                if (['Following', 'Followers', 'Liked', 'Shared'].includes(lines[i])) {
+                    labelMap[lines[i]] = i;
+                }
+            }
+            for (const [label, idx] of Object.entries(labelMap)) {
+                result[label.toLowerCase()] = lines[idx - 1] || '0';
+            }
+
+            // Creator Dashboard stats (label on line N, value on line N+1)
+            result.dashboard = {};
+            const dashLabels = ['Published', 'Followers gained', 'Views', 'Likes',
+                                'Comments', 'Shares', 'Quotes', 'Live Duration'];
+            // Only parse dashboard section (after "Creator Dashboard" line)
+            let dashStart = lines.findIndex(l => l === 'Creator Dashboard');
+            let dashEnd = lines.findIndex(l => l === 'My Published Content');
+            if (dashEnd === -1) dashEnd = lines.length;
+            for (let i = dashStart; i < dashEnd; i++) {
+                for (const label of dashLabels) {
+                    if (lines[i] === label && i + 1 < dashEnd) {
+                        result.dashboard[label.toLowerCase().replace(' ', '_')] = lines[i + 1];
+                    }
+                }
+            }
+
+            // Period
+            const periodLine = lines.find(l => l.startsWith('Period:'));
+            if (periodLine) result.dashboard.period = periodLine;
+
+            return result;
+        }''')
+
+        logger.info(
+            f"My stats: {stats.get('username', '?')}, "
+            f"followers={stats.get('followers', '?')}"
+        )
+        return stats
+
+    except Exception as e:
+        logger.error(f"get_my_stats: {e}")
+        return {"error": str(e)}
+    finally:
+        await pw.stop()
