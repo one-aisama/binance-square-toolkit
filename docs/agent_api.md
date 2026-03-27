@@ -80,6 +80,73 @@ Get current prices from Binance public API. No browser needed.
 }
 ```
 
+### `sdk.get_trending_coins(limit=10)`
+Get top coins by market cap with 24h stats from CoinGecko. No browser, no API key.
+
+**Parameters:**
+- `limit` (int): Number of coins. Default: 10
+
+**Returns:** `list[dict]`
+```python
+[
+    {"rank": 1, "symbol": "BTC", "name": "Bitcoin", "price": 69111.41,
+     "change_24h": -2.65, "market_cap": 1360000000000, "volume_24h": 28000000000},
+    ...
+]
+```
+
+### `sdk.get_crypto_news(limit=10)`
+Fetch latest crypto news headlines from RSS feeds. No browser, no API key.
+
+Sources: CoinDesk, CoinTelegraph, Decrypt.
+
+**Parameters:**
+- `limit` (int): Total articles to return. Default: 10
+
+**Returns:** `list[dict]` sorted by date (newest first)
+```python
+[
+    {"title": "Bitcoin Surges Past $70K...", "source": "CoinDesk",
+     "url": "https://coindesk.com/...", "published_at": "2026-03-27T14:30:00+00:00"},
+    ...
+]
+```
+
+### `sdk.get_article_content(url)`
+Fetch full text of a news article. Call when a headline from `get_crypto_news()` is worth a deep post.
+
+**Parameters:**
+- `url` (str): Article URL from `get_crypto_news()`
+
+**Returns:** `dict`
+```python
+{"title": "Bitcoin Surges...", "text": "Full article text...", "url": "...", "published_at": "2026-03-27"}
+```
+
+### `sdk.get_ta_summary(symbol="BTC", timeframe="1D")`
+Technical analysis summary. Fetches 200 candles from Binance, computes RSI, MACD, MAs, support/resistance.
+
+Agent uses this as a basis for forming its own market view — not as mechanical signals.
+
+**Parameters:**
+- `symbol` (str): Coin symbol, e.g. `"BTC"`, `"ETH"`, `"SOL"`
+- `timeframe` (str): `"1H"`, `"4H"`, `"1D"` (default), `"1W"`
+
+**Returns:** `dict`
+```python
+{
+    "symbol": "BTC", "timeframe": "1D",
+    "price": 69111.41, "change_pct": -2.65,
+    "trend": "bullish",           # bullish | bearish | neutral
+    "signal": "neutral",          # buy | sell | neutral
+    "rsi": 54.32, "rsi_zone": "neutral",  # oversold | neutral | overbought
+    "macd": 245.12, "macd_signal": 198.45, "macd_cross": "none",
+    "ma20": 68500.0, "ma50": 67200.0, "ma200": 62100.0,
+    "price_vs_ma200": "above",
+    "support": 66800.0, "resistance": 71200.0,
+}
+```
+
 ---
 
 ## Action Methods

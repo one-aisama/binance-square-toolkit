@@ -9,7 +9,7 @@
 | harvester.py | 122 | harvest_credentials() — навигация на Square через CDP, захват cookies + bapi headers |
 | credential_store.py | 80 | CredentialStore — SQLite CRUD для credentials (save, load, invalidate, is_expired) |
 | validator.py | 58 | validate_credentials() — тестовый запрос к bapi для проверки живости |
-| browser_actions.py | 652 | Все Playwright-действия: create_post, create_article, repost, comment_on_post, follow_author, browse_and_interact |
+| browser_actions.py | ~600 | Все Playwright-действия: create_post, create_article, repost, comment_on_post, follow_author, collect_feed_posts |
 | page_map.py | 79 | CSS-селекторы и URL Binance Square (обновлены 2026-03-24) |
 
 ## Зависимости
@@ -25,7 +25,7 @@
 - `validate_credentials(cookies, headers)` — возвращает bool
 - `create_post(ws_endpoint, text, coin, sentiment, image_path)` — публикация через Playwright
 - `comment_on_post(ws_endpoint, post_id, comment_text)` — обрабатывает "Follow & Reply" popup
-- `browse_and_interact(ws_endpoint, comment_generator, count)` — обход ленты + лайк/коммент/follow
+- `collect_feed_posts(ws_endpoint, count, tab)` — сбор постов из ленты для агента
 
 ## Типичные задачи
 - Добавить селектор: редактировать `page_map.py`, использовать в `browser_actions.py`

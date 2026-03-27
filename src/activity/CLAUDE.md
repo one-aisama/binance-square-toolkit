@@ -14,7 +14,7 @@
 - Использует: `bapi.client` (like_post работает; comment_post/repost — заглушки)
 - Использует: `accounts.limiter` (ActionLimiter — проверка и запись каждого действия)
 - Используется: `scheduler` (_run_activity вызывает ActivityExecutor)
-- Используется: `session.browser_actions` (browse_and_interact принимает CommentGenerator)
+- Используется: `session.browser_actions` (comment_on_post, create_post через SDK)
 
 ## Ключевые функции
 - `ActivityExecutor.run_cycle(account_id, posts, limits)` — возвращает `{likes, comments, reposts, skipped, errors}`
