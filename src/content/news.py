@@ -139,8 +139,13 @@ def _extract_article(html: str, url: str) -> tuple[str, str, str]:
     # Body: extract paragraphs, skip navigation/footer noise
     paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", html, re.DOTALL)
     cleaned = [_clean_text(p) for p in paragraphs]
-    # Filter out short snippets (nav links, captions)
-    body_parts = [p for p in cleaned if len(p) > 60]
+    # Filter out short snippets, SVG/CSS garbage, and nav links
+    body_parts = [
+        p for p in cleaned
+        if len(p) > 60
+        and not p.startswith(("Price data by", ".st0{", "{fill:", "window.", "var "))
+        and "{" not in p[:30]  # CSS/JS noise
+    ]
     text = "\n\n".join(body_parts)
 
     return title, text, published_at
