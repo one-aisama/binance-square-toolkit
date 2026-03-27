@@ -72,6 +72,11 @@ POST_SHARE_BUTTON = "div.detail-share-button"
 POST_REPLY_INPUT = 'input[placeholder="Post your reply"]'
 POST_REPLY_BUTTON = "button:has-text('Reply')"
 
+# Reply area on COMMENT detail page — uses ProseMirror editor, not input
+# Comments (nested replies) use a different editor than top-level posts
+COMMENT_REPLY_EDITOR = "div.ProseMirror"
+COMMENT_DETAIL_LIKE = "div.detail-thumb-up .thumb-up-button"
+
 # "Follow & Reply" popup — appears when author restricts comments to followers
 POST_FOLLOW_REPLY_POPUP = "button:has-text('Follow & Reply')"
 

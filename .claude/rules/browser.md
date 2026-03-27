@@ -10,7 +10,8 @@ globs: ["src/session/browser_actions.py", "src/session/page_map.py"]
 - Автокомплит хэштегов перекрывает кнопку Post — после каждого хэштега добавить пробел или нажать Escape.
 - Popup "Follow & Reply" нужно обработать при комментировании — клик по нему подписывает + отправляет коммент одним действием. После этого НЕ писать коммент повторно.
 - `follow_author()` должен проверять текст кнопки перед кликом: "Follow" = кликать, "Following"/"Unfollow" = НЕ кликать (отпишет).
-- Комменты идут через DOM input `input[placeholder="Post your reply"]` + кнопка Reply, НЕ через bapi POST.
+- Комменты на посты: DOM input `input[placeholder="Post your reply"]` + кнопка Reply. Комменты на КОММЕНТАРИИ: ProseMirror editor (`div.ProseMirror`) + кнопка Reply. `comment_on_post()` автоматически определяет тип страницы.
+- Лайк на странице комментария: `div.detail-thumb-up .thumb-up-button` (нужен scroll_into_view — кнопка часто ниже viewport). Лайк на посте: `div.thumb-up-button`.
 - Создание поста требует client-side nonce + signature — нельзя через httpx, только браузер.
 - Спам-фильтр в `browse_and_interact`: пропускать посты с текстом < 50 символов, лайками < 3, или содержащие "gift", "giveaway", "airdrop", "copy trading".
 - Человеческая задержка между действиями: `random.uniform(15, 35) + (interacted_count * 2)` секунд.

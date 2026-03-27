@@ -392,14 +392,27 @@ async def comment_on_post(ws_endpoint: str, post_id: str, comment_text: str) -> 
         await page.evaluate("window.scrollBy(0, 800)")
         await asyncio.sleep(2)
 
-        # Find and click reply input
+        # Try regular post reply input first, fallback to ProseMirror (comment pages)
         reply_input = page.locator(page_map.POST_REPLY_INPUT).first
-        await reply_input.scroll_into_view_if_needed()
-        await asyncio.sleep(1)
-        await reply_input.click()
-        await asyncio.sleep(1)
+        use_prosemirror = False
 
-        # Type comment via keyboard (Binance custom input doesn't accept locator.type)
+        try:
+            await reply_input.wait_for(state="visible", timeout=3_000)
+            await reply_input.scroll_into_view_if_needed()
+            await asyncio.sleep(1)
+            await reply_input.click()
+            await asyncio.sleep(1)
+        except Exception:
+            # Comment detail pages use ProseMirror editor instead of plain input
+            logger.info("Regular reply input not found, trying ProseMirror editor (comment page)")
+            editor = page.locator(page_map.COMMENT_REPLY_EDITOR).first
+            await editor.scroll_into_view_if_needed()
+            await asyncio.sleep(1)
+            await editor.click()
+            await asyncio.sleep(1)
+            use_prosemirror = True
+
+        # Type comment via keyboard (both input types work with keyboard.type)
         await page.keyboard.type(comment_text, delay=60)
         await asyncio.sleep(2)
 
@@ -716,10 +729,10 @@ async def get_user_profile(ws_endpoint: str, username: str) -> dict[str, Any]:
 
 
 async def get_post_comments(ws_endpoint: str, post_id: str, limit: int = 20) -> list[dict[str, Any]]:
-    """Fetch comments on a specific post.
+    """Fetch comments on a specific post using feed-buzz-card selectors.
 
     Navigates to post page, scrolls to load comments, and extracts
-    author + text for each comment.
+    author + text for each comment card.
 
     Args:
         ws_endpoint: CDP websocket endpoint
@@ -727,7 +740,7 @@ async def get_post_comments(ws_endpoint: str, post_id: str, limit: int = 20) -> 
         limit: Max comments to return (default 20)
 
     Returns:
-        [{author, text, is_own}] — is_own=True if comment is from the post author
+        [{author, author_handle, text}]
     """
     pw, browser, page = await _get_page(ws_endpoint)
 
@@ -736,82 +749,34 @@ async def get_post_comments(ws_endpoint: str, post_id: str, limit: int = 20) -> 
         await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
         await asyncio.sleep(5)
 
-        # Scroll down to load comments
-        for _ in range(3):
-            await page.evaluate("window.scrollBy(0, 800)")
+        # Scroll to load comments
+        for _ in range(4):
+            await page.evaluate("window.scrollBy(0, 600)")
             await asyncio.sleep(2)
 
         comments = await page.evaluate(r'''(limit) => {
+            const cards = document.querySelectorAll('.feed-buzz-card-base-view');
             const results = [];
+            // Skip first card (it's the main post, not a comment)
+            for (let i = 1; i < cards.length && results.length < limit; i++) {
+                const card = cards[i];
+                const nickEl = card.querySelector('.nick-username a.nick');
+                const bodyEl = card.querySelector('.card__bd');
+                if (!nickEl) continue;
 
-            // Comment items are in the replies/comments section
-            // Each comment block typically has: avatar, author name, comment text
-            const commentBlocks = document.querySelectorAll(
-                '[class*="comment-item"], [class*="reply-item"], .css-comment-item'
-            );
+                const author = nickEl.textContent.trim();
+                const href = nickEl.getAttribute('href') || '';
+                const handleMatch = href.match(/profile\/([^?/]+)/);
+                const text = bodyEl
+                    ? bodyEl.innerText.trim().substring(0, 300)
+                    : '';
 
-            // Fallback: look for structured comment containers
-            // Binance Square comments have a pattern: author link + text block
-            if (commentBlocks.length === 0) {
-                // Try generic approach: find all reply sections after main post
-                const allText = document.body.innerText;
-                const replySection = allText.indexOf('Replies');
-                if (replySection === -1) return results;
-
-                // Parse from DOM structure — comments are typically in a list
-                // after the "Replies N" header
-                const containers = document.querySelectorAll(
-                    '[data-bn-type="text"]'
-                );
-                // This is a best-effort fallback
+                results.push({
+                    author: author,
+                    author_handle: handleMatch ? handleMatch[1] : '',
+                    text: text,
+                });
             }
-
-            for (const block of commentBlocks) {
-                if (results.length >= limit) break;
-
-                const authorEl = block.querySelector('a[href*="/square/profile/"]');
-                const textEl = block.querySelector('[class*="content"], [class*="text"]');
-
-                if (authorEl && textEl) {
-                    const href = authorEl.getAttribute('href') || '';
-                    const authorMatch = href.match(/profile\/([^?/]+)/);
-                    results.push({
-                        author: authorMatch ? authorMatch[1] : authorEl.innerText.trim(),
-                        text: textEl.innerText.trim(),
-                    });
-                }
-            }
-
-            // Second strategy if CSS class approach found nothing:
-            // Look for reply containers by structure
-            if (results.length === 0) {
-                const replyArea = document.querySelector('[class*="reply-list"], [class*="comment-list"]');
-                if (replyArea) {
-                    const items = replyArea.children;
-                    for (let i = 0; i < Math.min(items.length, limit); i++) {
-                        const item = items[i];
-                        const links = item.querySelectorAll('a[href*="/square/profile/"]');
-                        const text = item.innerText.trim();
-                        if (links.length > 0 && text.length > 0) {
-                            const href = links[0].getAttribute('href') || '';
-                            const m = href.match(/profile\/([^?/]+)/);
-                            // Extract comment text (remove author name from start)
-                            const authorName = links[0].innerText.trim();
-                            let commentText = text;
-                            if (commentText.startsWith(authorName)) {
-                                commentText = commentText.slice(authorName.length).trim();
-                            }
-                            // Clean up — remove trailing metadata (timestamps, like counts)
-                            const lines = commentText.split('\n').filter(l => l.trim());
-                            results.push({
-                                author: m ? m[1] : authorName,
-                                text: lines[0] || commentText.substring(0, 200),
-                            });
-                        }
-                    }
-                }
-            }
-
             return results;
         }''', limit)
 
@@ -820,6 +785,170 @@ async def get_post_comments(ws_endpoint: str, post_id: str, limit: int = 20) -> 
 
     except Exception as e:
         logger.error(f"get_post_comments: {e}, post_id={post_id}")
+        return []
+    finally:
+        await pw.stop()
+
+
+async def get_my_comment_replies(ws_endpoint: str, username: str = "aisama") -> list[dict[str, Any]]:
+    """Find replies to agent's comments by checking the profile Replies tab.
+
+    Flow:
+    1. Navigate to profile → Replies tab
+    2. Scroll to load reply cards
+    3. Find agent's cards where comment count > 0 (someone replied)
+    4. For each, click the card to navigate to the comment page
+    5. Read the replies there
+
+    Args:
+        ws_endpoint: CDP websocket endpoint
+        username: Agent's Binance Square username
+
+    Returns:
+        [{comment_text, comment_post_id, replies: [{author, author_handle, text}]}]
+    """
+    pw, browser, page = await _get_page(ws_endpoint)
+
+    try:
+        profile_url = f"https://www.binance.com/en/square/profile/{username}"
+        await page.goto(profile_url, wait_until="domcontentloaded", timeout=60_000)
+        await asyncio.sleep(5)
+
+        # Click Replies tab
+        replies_tab = page.locator("div.category:has-text('Replies')").first
+        await replies_tab.click()
+        await asyncio.sleep(4)
+
+        # Scroll to load
+        for _ in range(4):
+            await page.evaluate("window.scrollBy(0, 700)")
+            await asyncio.sleep(2)
+
+        # Find our reply cards with comment count > 0
+        cards_with_replies = await page.evaluate(r'''(username) => {
+            const cards = document.querySelectorAll('.feed-buzz-card-base-view');
+            const results = [];
+
+            for (let i = 0; i < cards.length; i++) {
+                const card = cards[i];
+                const nickEl = card.querySelector('.nick-username a.nick');
+                if (!nickEl) continue;
+                const author = nickEl.textContent.trim();
+                if (author !== username) continue;
+
+                // Check comment count
+                const commentIcon = card.querySelector('.comments-icon');
+                const countText = commentIcon ? commentIcon.innerText.trim() : '0';
+                const count = parseInt(countText) || 0;
+                if (count === 0) continue;
+
+                // Get our comment text
+                const bodyEl = card.querySelector('.card__bd');
+                const text = bodyEl
+                    ? bodyEl.innerText.trim().substring(0, 200)
+                    : '';
+
+                results.push({
+                    index: i,
+                    comment_text: text,
+                    reply_count: count,
+                });
+            }
+            return results;
+        }''', username)
+
+        logger.info(
+            f"get_my_comment_replies: {len(cards_with_replies)} comments have replies"
+        )
+
+        if not cards_with_replies:
+            return []
+
+        # For each card with replies, click it to navigate to the comment page
+        # and read the replies there
+        results = []
+
+        for card_info in cards_with_replies:
+            idx = card_info["index"]
+            try:
+                # Re-navigate to profile Replies tab (page may have changed)
+                if "profile" not in page.url:
+                    await page.goto(profile_url, wait_until="domcontentloaded", timeout=60_000)
+                    await asyncio.sleep(4)
+                    await page.locator("div.category:has-text('Replies')").first.click()
+                    await asyncio.sleep(3)
+                    for _ in range(4):
+                        await page.evaluate("window.scrollBy(0, 700)")
+                        await asyncio.sleep(1.5)
+
+                # Click the card body to navigate to comment page
+                all_cards = await page.locator(".feed-buzz-card-base-view").all()
+                if idx >= len(all_cards):
+                    continue
+
+                card = all_cards[idx]
+                body_el = card.locator(".card__bd").first
+                await body_el.click()
+                await asyncio.sleep(5)
+
+                # Extract post_id from URL
+                current_url = page.url
+                post_id_match = re.search(r"/post/(\d+)", current_url)
+                comment_post_id = post_id_match.group(1) if post_id_match else ""
+
+                # Scroll to load replies
+                for _ in range(3):
+                    await page.evaluate("window.scrollBy(0, 500)")
+                    await asyncio.sleep(1.5)
+
+                # Read reply cards (skip first card which is our comment)
+                replies = await page.evaluate(r'''() => {
+                    const cards = document.querySelectorAll('.feed-buzz-card-base-view');
+                    const results = [];
+                    for (let i = 1; i < cards.length; i++) {
+                        const card = cards[i];
+                        const nickEl = card.querySelector('.nick-username a.nick');
+                        const bodyEl = card.querySelector('.card__bd');
+                        if (!nickEl) continue;
+
+                        const author = nickEl.textContent.trim();
+                        const href = nickEl.getAttribute('href') || '';
+                        const handleMatch = href.match(/profile\/([^?/]+)/);
+                        const text = bodyEl
+                            ? bodyEl.innerText.trim().substring(0, 300)
+                            : '';
+
+                        if (text) {
+                            results.push({
+                                author: author,
+                                author_handle: handleMatch ? handleMatch[1] : '',
+                                text: text,
+                            });
+                        }
+                    }
+                    return results;
+                }''')
+
+                results.append({
+                    "comment_text": card_info["comment_text"],
+                    "comment_post_id": comment_post_id,
+                    "reply_count": card_info["reply_count"],
+                    "replies": replies,
+                })
+
+                logger.info(
+                    f"Comment '{card_info['comment_text'][:40]}...' has "
+                    f"{len(replies)} replies at post {comment_post_id}"
+                )
+
+            except Exception as e:
+                logger.error(f"get_my_comment_replies: error reading replies for card {idx}: {e}")
+                continue
+
+        return results
+
+    except Exception as e:
+        logger.error(f"get_my_comment_replies: {e}")
         return []
     finally:
         await pw.stop()

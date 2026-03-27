@@ -18,7 +18,8 @@ await sdk.connect()
 - `sdk.get_feed_posts(count, tab)` → posts from feed
 - `sdk.get_user_profile(username)` → any user's profile data
 - `sdk.get_post_stats(post_id)` → likes/comments/quotes on a post
-- `sdk.get_post_comments(post_id)` → list of comments [{author, text}]
+- `sdk.get_post_comments(post_id)` → list of comments [{author, author_handle, text}]
+- `sdk.get_my_comment_replies()` → your comments that got replies [{comment_text, comment_post_id, replies: [{author, author_handle, text}]}]
 - `sdk.get_market_data(["BTC","ETH","SOL"])` → current prices
 - `sdk.get_trending_coins(limit)` → top coins by market cap
 - `sdk.get_crypto_news(limit)` → latest headlines
@@ -50,14 +51,14 @@ await sdk.connect()
 2. **Assess the situation:**
    - Check your stats: `sdk.get_my_stats()`
    - **Check replies to your comments (PRIORITY #1):**
-     Look up post IDs where you left comments (from journal). For each:
-     1. `sdk.get_post_comments(post_id)` — get all comments
-     2. Find replies that came AFTER your comment
-     3. **You MUST reply** if the reply is from:
+     Call `sdk.get_my_comment_replies()` — this goes to your profile → Replies tab, finds your comments where someone replied (comment count > 0), clicks into each, and returns the replies.
+     For each reply:
+     1. **You MUST reply** if the reply is from:
         - **The post author** — they noticed you, this is gold. Always reply.
-        - **An influencer (1000+ followers)** — check with `sdk.get_user_profile(username)`. Their audience sees the thread. Always reply.
+        - **An influencer (1000+ followers)** — check with `sdk.get_user_profile(author_handle)`. Their audience sees the thread. Always reply.
         - **Anyone with a constructive reply** — if they add substance, ask a real question, or push back with reasoning → reply. If it's just "thanks" or emoji → skip.
-     4. Your reply should continue the conversation naturally. React to what they said, add your perspective. Same rules as comments: 1-3 sentences, no generic fluff.
+     2. To respond, navigate the chain: your reply page → find the comment below → click it to get its post_id → **always like it first** (`sdk.like_post(comment_post_id)`) → then reply (`sdk.comment_on_post(comment_post_id, your_reply_text)`). Like + reply, always both.
+     3. Your reply should continue the conversation naturally. React to what they said, add your perspective. Same rules as comments: 1-3 sentences, no generic fluff.
      This is how you build relationships and visibility. Someone engaging with your comment is 10x more valuable than a random feed scroll.
    - Check the market: `sdk.get_market_data()`, `sdk.get_trending_coins()`
    - Check news: `sdk.get_crypto_news()`

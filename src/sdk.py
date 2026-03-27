@@ -29,6 +29,7 @@ from src.session.browser_actions import (
     follow_author,
     get_user_profile,
     get_post_comments,
+    get_my_comment_replies,
     get_post_stats,
     get_my_stats,
 )
@@ -144,6 +145,25 @@ class BinanceSquareSDK:
         """
         ws = self._require_connection()
         return await get_post_comments(ws, post_id, limit=limit)
+
+    async def get_my_comment_replies(self, username: str = "aisama") -> list[dict[str, Any]]:
+        """Find replies to agent's comments on other people's posts.
+
+        Goes to profile → Replies tab, finds comments that received replies,
+        clicks into each to read who replied and what they said.
+
+        Agent uses this as PRIORITY #1 every session — reply to people
+        who engaged with your comments.
+
+        Args:
+            username: Agent's Binance Square username
+
+        Returns:
+            [{comment_text, comment_post_id, reply_count,
+              replies: [{author, author_handle, text}]}]
+        """
+        ws = self._require_connection()
+        return await get_my_comment_replies(ws, username=username)
 
     async def get_my_stats(self) -> dict[str, Any]:
         """Fetch own profile stats from Creator Center.
@@ -378,14 +398,24 @@ class BinanceSquareSDK:
             await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
             await asyncio.sleep(5)
 
-            like_btn = page.locator(page_map.POST_LIKE_BUTTON).first
-            await like_btn.wait_for(state="visible", timeout=10_000)
-            await asyncio.sleep(1)
-            await like_btn.click()
-            await asyncio.sleep(3)
+            # Try detail-level like first (comment pages), then card-level (posts)
+            detail_like = page.locator(page_map.COMMENT_DETAIL_LIKE).first
+            card_like = page.locator(page_map.POST_LIKE_BUTTON).first
 
-            # Verify like was registered (button text/state may change)
-            logger.info(f"Liked post {post_id}")
+            try:
+                await detail_like.wait_for(state="visible", timeout=3_000)
+                await detail_like.scroll_into_view_if_needed()
+                await asyncio.sleep(1)
+                await detail_like.click()
+                logger.info(f"Liked comment {post_id} (detail-thumb-up)")
+            except Exception:
+                await card_like.wait_for(state="visible", timeout=10_000)
+                await card_like.scroll_into_view_if_needed()
+                await asyncio.sleep(1)
+                await card_like.click()
+                logger.info(f"Liked post {post_id} (thumb-up-button)")
+
+            await asyncio.sleep(3)
             return {"success": True, "post_id": post_id}
         except Exception as e:
             logger.error(f"Like failed on {post_id}: {e}")
