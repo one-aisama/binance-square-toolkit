@@ -25,7 +25,7 @@ await sdk.connect()
 - `sdk.get_ta_summary(symbol, timeframe)` → RSI, MACD, MAs, support/resistance
 
 **Actions (browser):**
-- `sdk.create_post(text, coin, sentiment, image_path)` → publish post
+- `sdk.create_post(text, coin, sentiment, image_path)` → publish post. SDK handles the correct order internally: text → image → chart → sentiment → Post.
 - `sdk.create_article(title, body, cover_path)` → publish article
 - `sdk.comment_on_post(post_id, text)` → comment on someone's post
 - `sdk.like_post(post_id)` → like a post

@@ -93,21 +93,21 @@ async def create_post(
         await editor.click()
         await asyncio.sleep(1)
 
-        # 2. Type text (slow, human-like)
+        # 2. Type text (slow, human-like) — MUST be first
         await _type_with_hashtag_handling(page, text, delay=60)
         await asyncio.sleep(2)
 
-        # 3. Add chart if coin specified
+        # 3. Attach image if specified — BEFORE chart (order matters!)
+        if image_path:
+            await _attach_image_inline(page, image_path)
+
+        # 4. Add chart if coin specified — AFTER text and image
         if coin:
             await _add_chart(page, coin)
 
-        # 4. Set sentiment if specified
+        # 5. Set sentiment if specified
         if sentiment:
             await _set_sentiment(page, sentiment)
-
-        # 5. Attach image if specified
-        if image_path:
-            await _attach_image_inline(page, image_path)
 
         # 6. Set up response capture
         post_response = None

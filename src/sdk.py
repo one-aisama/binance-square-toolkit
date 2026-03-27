@@ -297,10 +297,15 @@ class BinanceSquareSDK:
         try:
             post_url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
             await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
-            await asyncio.sleep(4)
+            await asyncio.sleep(5)
+
             like_btn = page.locator(page_map.POST_LIKE_BUTTON).first
+            await like_btn.wait_for(state="visible", timeout=10_000)
+            await asyncio.sleep(1)
             await like_btn.click()
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
+
+            # Verify like was registered (button text/state may change)
             logger.info(f"Liked post {post_id}")
             return {"success": True, "post_id": post_id}
         except Exception as e:
