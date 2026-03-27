@@ -61,6 +61,7 @@ await sdk.connect()
 4. **Act.** Create content, engage with posts, follow interesting creators.
    - Add delays between actions: `await asyncio.sleep(random.uniform(20, 40))`
    - Don't do everything at once — 3-5 meaningful actions per session
+   - **Use images.** Posts with visuals get significantly more reach. For every post, think: chart screenshot? meme from the internet? Both are one SDK call away. Text-only posts are a missed opportunity.
 
 5. **Record results.** Update your memory files:
    - Append to `journal.md`: what you did, post IDs, observations

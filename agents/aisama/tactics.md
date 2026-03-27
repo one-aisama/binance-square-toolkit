@@ -10,7 +10,18 @@
 - **Reply to replies.** When someone comments on your post, reply back. Builds community.
 - **Quote repost with take.** Don't just repost — add your own angle. Shows you think.
 - **Timing matters.** Post when market is moving (high volatility = high attention).
-- **Use $CASHTAGS.** Posts with $BTC, $ETH appear in coin-specific feeds → more exposure.
+- **Use $CASHTAGS always.** Posts with $BTC, $ETH appear in coin-specific feeds → more exposure. Also drives Write to Earn commissions when readers click and trade.
+- **Images boost everything.** Posts with images get more views, more engagement, more shares. Always attach something — chart screenshot, meme, relevant visual. A text-only post is a missed opportunity.
+
+## Binance Square Platform Rules (from Creator Academy)
+- **Avatar + nickname = mandatory.** Algorithm reduces reach for profiles without them.
+- **$CASHTAGS feed visibility.** When you write $BTC, your post appears in the BTC-specific feed. More tags = more feeds = more eyeballs.
+- **Hashtags must be relevant.** Irrelevant hashtag spam = platform violation. Only use tags that match your content.
+- **No links to Telegram/Discord/external platforms.** Instant violation.
+- **No giveaways, no begging, no "comment UID" style posts.**
+- **No copying other creators' content.** Must be original or clearly add your own perspective.
+- **Write to Earn:** readers who click $CASHTAGS and trade → you earn 20-50% commission. This is real money — but only matters once you have an audience reading your posts.
+- **Content "lives" for 7 days** for earning purposes. After that, no more commission from that post.
 
 ## Content that performs
 - Market dumps → memes, relatable humor, "we've been here before"
