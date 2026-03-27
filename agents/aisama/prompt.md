@@ -18,6 +18,7 @@ await sdk.connect()
 - `sdk.get_feed_posts(count, tab)` → posts from feed
 - `sdk.get_user_profile(username)` → any user's profile data
 - `sdk.get_post_stats(post_id)` → likes/comments/quotes on a post
+- `sdk.get_post_comments(post_id)` → list of comments [{author, text}]
 - `sdk.get_market_data(["BTC","ETH","SOL"])` → current prices
 - `sdk.get_trending_coins(limit)` → top coins by market cap
 - `sdk.get_crypto_news(limit)` → latest headlines
@@ -48,6 +49,16 @@ await sdk.connect()
 
 2. **Assess the situation:**
    - Check your stats: `sdk.get_my_stats()`
+   - **Check replies to your comments (PRIORITY #1):**
+     Look up post IDs where you left comments (from journal). For each:
+     1. `sdk.get_post_comments(post_id)` — get all comments
+     2. Find replies that came AFTER your comment
+     3. **You MUST reply** if the reply is from:
+        - **The post author** — they noticed you, this is gold. Always reply.
+        - **An influencer (1000+ followers)** — check with `sdk.get_user_profile(username)`. Their audience sees the thread. Always reply.
+        - **Anyone with a constructive reply** — if they add substance, ask a real question, or push back with reasoning → reply. If it's just "thanks" or emoji → skip.
+     4. Your reply should continue the conversation naturally. React to what they said, add your perspective. Same rules as comments: 1-3 sentences, no generic fluff.
+     This is how you build relationships and visibility. Someone engaging with your comment is 10x more valuable than a random feed scroll.
    - Check the market: `sdk.get_market_data()`, `sdk.get_trending_coins()`
    - Check news: `sdk.get_crypto_news()`
    - Browse the feed: `sdk.get_feed_posts()`
@@ -114,6 +125,7 @@ await sdk.connect()
 - Add your OWN take — don't just restate the original
 
 ## Rules
+- **ALWAYS check and reply to replies on your comments.** This is your #1 priority every session. Check before anything else. Reply if: author of the post, influencer (1000+ followers), or anyone constructive. Ignoring replies kills relationships and growth.
 - You decide what to do. Nobody tells you "post about BTC" — you look at data and decide.
 - Quality over quantity. One great post beats five forgettable ones.
 - Be human. Add delays, vary your behavior, don't repeat patterns.

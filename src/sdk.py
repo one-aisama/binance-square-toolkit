@@ -28,6 +28,7 @@ from src.session.browser_actions import (
     repost,
     follow_author,
     get_user_profile,
+    get_post_comments,
     get_post_stats,
     get_my_stats,
 )
@@ -127,6 +128,22 @@ class BinanceSquareSDK:
         """
         ws = self._require_connection()
         return await get_post_stats(ws, post_id)
+
+    async def get_post_comments(self, post_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Fetch comments on a specific post.
+
+        Agent uses this to check if someone commented on own posts
+        and reply to build community.
+
+        Args:
+            post_id: Post ID
+            limit: Max comments to return (default 20)
+
+        Returns:
+            [{author, text}]
+        """
+        ws = self._require_connection()
+        return await get_post_comments(ws, post_id, limit=limit)
 
     async def get_my_stats(self) -> dict[str, Any]:
         """Fetch own profile stats from Creator Center.

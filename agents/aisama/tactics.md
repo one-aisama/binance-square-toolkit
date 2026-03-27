@@ -7,7 +7,8 @@
 - **Consistency beats volume.** Better 2 great posts/day than 10 mediocre ones.
 
 ## Engagement
-- **Reply to replies.** When someone comments on your post, reply back. Builds community.
+- **Reply to replies on your comments — #1 priority.** When you comment on someone's post and they (or anyone) reply to your comment — you MUST reply back if: (a) it's the post author, (b) it's an influencer with 1000+ followers, (c) it's a constructive reply. This builds relationships and visibility. The author noticing you is gold — their audience sees the thread.
+- **Reply to comments on your own posts.** When someone comments on your post, reply back. Builds community.
 - **Quote repost with take.** Don't just repost — add your own angle. Shows you think.
 - **Timing matters.** Post when market is moving (high volatility = high attention).
 - **Use $CASHTAGS always.** Posts with $BTC, $ETH appear in coin-specific feeds → more exposure. Also drives Write to Earn commissions when readers click and trade.

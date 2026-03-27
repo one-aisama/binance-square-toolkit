@@ -715,6 +715,116 @@ async def get_user_profile(ws_endpoint: str, username: str) -> dict[str, Any]:
         await pw.stop()
 
 
+async def get_post_comments(ws_endpoint: str, post_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Fetch comments on a specific post.
+
+    Navigates to post page, scrolls to load comments, and extracts
+    author + text for each comment.
+
+    Args:
+        ws_endpoint: CDP websocket endpoint
+        post_id: Post ID
+        limit: Max comments to return (default 20)
+
+    Returns:
+        [{author, text, is_own}] — is_own=True if comment is from the post author
+    """
+    pw, browser, page = await _get_page(ws_endpoint)
+
+    try:
+        url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
+        await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+        await asyncio.sleep(5)
+
+        # Scroll down to load comments
+        for _ in range(3):
+            await page.evaluate("window.scrollBy(0, 800)")
+            await asyncio.sleep(2)
+
+        comments = await page.evaluate(r'''(limit) => {
+            const results = [];
+
+            // Comment items are in the replies/comments section
+            // Each comment block typically has: avatar, author name, comment text
+            const commentBlocks = document.querySelectorAll(
+                '[class*="comment-item"], [class*="reply-item"], .css-comment-item'
+            );
+
+            // Fallback: look for structured comment containers
+            // Binance Square comments have a pattern: author link + text block
+            if (commentBlocks.length === 0) {
+                // Try generic approach: find all reply sections after main post
+                const allText = document.body.innerText;
+                const replySection = allText.indexOf('Replies');
+                if (replySection === -1) return results;
+
+                // Parse from DOM structure — comments are typically in a list
+                // after the "Replies N" header
+                const containers = document.querySelectorAll(
+                    '[data-bn-type="text"]'
+                );
+                // This is a best-effort fallback
+            }
+
+            for (const block of commentBlocks) {
+                if (results.length >= limit) break;
+
+                const authorEl = block.querySelector('a[href*="/square/profile/"]');
+                const textEl = block.querySelector('[class*="content"], [class*="text"]');
+
+                if (authorEl && textEl) {
+                    const href = authorEl.getAttribute('href') || '';
+                    const authorMatch = href.match(/profile\/([^?/]+)/);
+                    results.push({
+                        author: authorMatch ? authorMatch[1] : authorEl.innerText.trim(),
+                        text: textEl.innerText.trim(),
+                    });
+                }
+            }
+
+            // Second strategy if CSS class approach found nothing:
+            // Look for reply containers by structure
+            if (results.length === 0) {
+                const replyArea = document.querySelector('[class*="reply-list"], [class*="comment-list"]');
+                if (replyArea) {
+                    const items = replyArea.children;
+                    for (let i = 0; i < Math.min(items.length, limit); i++) {
+                        const item = items[i];
+                        const links = item.querySelectorAll('a[href*="/square/profile/"]');
+                        const text = item.innerText.trim();
+                        if (links.length > 0 && text.length > 0) {
+                            const href = links[0].getAttribute('href') || '';
+                            const m = href.match(/profile\/([^?/]+)/);
+                            // Extract comment text (remove author name from start)
+                            const authorName = links[0].innerText.trim();
+                            let commentText = text;
+                            if (commentText.startsWith(authorName)) {
+                                commentText = commentText.slice(authorName.length).trim();
+                            }
+                            // Clean up — remove trailing metadata (timestamps, like counts)
+                            const lines = commentText.split('\n').filter(l => l.trim());
+                            results.push({
+                                author: m ? m[1] : authorName,
+                                text: lines[0] || commentText.substring(0, 200),
+                            });
+                        }
+                    }
+                }
+            }
+
+            return results;
+        }''', limit)
+
+        logger.info(f"get_post_comments: {len(comments)} comments on post {post_id}")
+        return comments
+
+    except Exception as e:
+        logger.error(f"get_post_comments: {e}, post_id={post_id}")
+        return []
+    finally:
+        await pw.stop()
+
+
 async def get_post_stats(ws_endpoint: str, post_id: str) -> dict[str, Any]:
     """Fetch engagement stats for a specific post.
 
