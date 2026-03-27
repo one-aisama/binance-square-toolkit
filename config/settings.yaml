@@ -1,0 +1,31 @@
+# Scheduler
+cycle_interval_hours: [2, 4]
+first_run_immediate: true
+
+# BapiClient
+bapi_base_url: "https://www.binance.com"
+bapi_rate_limit_rpm: 30
+bapi_retry_attempts: 3
+bapi_retry_backoff_sec: 1.0
+
+# AdsPower
+adspower_base_url: "http://local.adspower.net:50325"
+adspower_start_timeout_sec: 60
+adspower_stop_timeout_sec: 30
+
+# Credential management
+credential_check_before_cycle: true
+credential_max_age_hours: 12
+
+# Content generation (posts, articles)
+ai_provider: anthropic
+ai_model: claude-sonnet-4-6
+
+# Comment generation (separate from post generation — cheaper model)
+comment_ai_provider: deepseek    # deepseek, openai, anthropic
+comment_ai_model: deepseek-chat
+
+# Activity defaults
+activity_delay_range_sec: [30, 120]
+activity_skip_rate: 0.35
+activity_min_views_for_comment: 1000

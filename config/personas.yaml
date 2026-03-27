@@ -1,0 +1,36 @@
+personas:
+  - id: defi_analyst
+    name: "DeFi Analyst"
+    topics: [defi, yield, protocols, lending]
+    style: "analytical, data-heavy, medium length"
+    language: en
+
+  - id: trader_signals
+    name: "Crypto Trader"
+    topics: [trading, technical_analysis, price_action]
+    style: "short, confident, specific price levels"
+    language: en
+
+  - id: news_flash
+    name: "Crypto News"
+    topics: [news, listings, regulations]
+    style: "breaking news format, fast, factual"
+    language: en
+
+  - id: layer1_infra
+    name: "Chain Observer"
+    topics: [layer1, infrastructure, scaling, bridges]
+    style: "technical, comparative, detailed"
+    language: en
+
+  - id: edu_beginner
+    name: "Crypto Academy"
+    topics: [education, beginner, explainers]
+    style: "simple, friendly, step-by-step"
+    language: en
+
+  - id: rwa_institutional
+    name: "Institutional Crypto"
+    topics: [rwa, tokenization, institutional, etf]
+    style: "professional, bloomberg-style, formal"
+    language: en

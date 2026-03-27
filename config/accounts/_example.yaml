@@ -1,0 +1,12 @@
+account_id: example_account
+persona_id: defi_analyst
+binance_uid: "123456"
+adspower_profile_id: "abc123"
+proxy:
+  host: xxx.iproxy.online
+  port: 30001
+limits:
+  posts_per_day: [3, 5]
+  likes_per_day: [30, 60]
+  comments_per_day: [12, 24]
+  min_interval_sec: 90
