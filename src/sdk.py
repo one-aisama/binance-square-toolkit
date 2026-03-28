@@ -15,10 +15,13 @@ Usage:
     await sdk.disconnect()
 """
 
+import asyncio
 import logging
 from typing import Any
 
 import httpx
+
+from src.runtime.guard import ActionGuard, Verdict
 
 from src.session.browser_actions import (
     collect_feed_posts,
@@ -37,6 +40,7 @@ from src.content.market_data import get_market_data, get_trending_coins
 from src.content.news import get_crypto_news, get_article_content
 from src.content.technical_analysis import get_ta_summary
 from src.content.validator import validate_post, validate_comment, validate_article, validate_quote
+from src.runtime.behavior import warm_up, mouse_move_to
 
 logger = logging.getLogger("bsq.sdk")
 
@@ -49,9 +53,10 @@ class BinanceSquareSDK:
     Agent uses this as the single entry point. All browser/API details hidden.
     """
 
-    def __init__(self, profile_serial: str):
+    def __init__(self, profile_serial: str = "1", guard: ActionGuard | None = None):
         self._serial = profile_serial
         self._ws_endpoint: str | None = None
+        self._guard = guard
 
     # ---- Connection ----
 
@@ -97,6 +102,36 @@ class BinanceSquareSDK:
         if not self._ws_endpoint:
             raise SDKError("Not connected. Call sdk.connect() first.")
         return self._ws_endpoint
+
+    async def _check_guard(self, action_type: str) -> bool:
+        """Check guard before action. Returns True if allowed, False if denied.
+
+        If guard not set, always allows.
+        """
+        if not self._guard:
+            return True
+
+        decision = await self._guard.check(action_type)
+        if decision.verdict == Verdict.ALLOW:
+            return True
+        elif decision.verdict == Verdict.WAIT:
+            await asyncio.sleep(decision.wait_seconds)
+            decision = await self._guard.check(action_type)
+            return decision.verdict == Verdict.ALLOW
+        elif decision.verdict == Verdict.DENIED:
+            logger.warning(f"Guard denied {action_type}: {decision.reason}")
+            if decision.fallback_action:
+                logger.info(f"Fallback suggested: {decision.fallback_action}")
+            return False
+        elif decision.verdict == Verdict.SESSION_OVER:
+            logger.error(f"Guard: session over — {decision.reason}")
+            return False
+        return False
+
+    def _record_guard(self, action_type: str, success: bool, error: str | None = None):
+        """Record action result in guard if guard is set."""
+        if self._guard:
+            self._guard.record(action_type, success, error)
 
     # ---- Data: Feed, Profiles & Trends ----
 
@@ -265,6 +300,9 @@ class BinanceSquareSDK:
         Returns:
             {success, post_id, followed} or {success: False, validation_errors}
         """
+        if not await self._check_guard("comment"):
+            return {"success": False, "error": "Guard denied: comment"}
+
         if not skip_validation:
             result = validate_comment(text)
             if not result.valid:
@@ -278,7 +316,13 @@ class BinanceSquareSDK:
                 logger.info(f"comment_on_post: validation warnings — {result.warnings}")
 
         ws = self._require_connection()
-        return await comment_on_post(ws, post_id, text)
+        try:
+            response = await comment_on_post(ws, post_id, text)
+            self._record_guard("comment", success=response.get("success", False))
+            return response
+        except Exception as e:
+            self._record_guard("comment", success=False, error=str(e))
+            raise
 
     async def create_post(
         self,
@@ -304,6 +348,9 @@ class BinanceSquareSDK:
         Returns:
             {success, post_id, response} or {success: False, validation_errors, validation_warnings}
         """
+        if not await self._check_guard("post"):
+            return {"success": False, "error": "Guard denied: post"}
+
         if not skip_validation:
             result = validate_post(text, recent_posts=recent_posts)
             if not result.valid:
@@ -317,7 +364,13 @@ class BinanceSquareSDK:
                 logger.info(f"create_post: validation warnings — {result.warnings}")
 
         ws = self._require_connection()
-        return await create_post(ws, text, coin=coin, sentiment=sentiment, image_path=image_path)
+        try:
+            response = await create_post(ws, text, coin=coin, sentiment=sentiment, image_path=image_path)
+            self._record_guard("post", success=response.get("success", False))
+            return response
+        except Exception as e:
+            self._record_guard("post", success=False, error=str(e))
+            raise
 
     async def create_article(
         self,
@@ -333,6 +386,9 @@ class BinanceSquareSDK:
         Returns:
             {success, post_id, response} or {success: False, validation_errors, validation_warnings}
         """
+        if not await self._check_guard("post"):
+            return {"success": False, "error": "Guard denied: post"}
+
         if not skip_validation:
             result = validate_article(title, body)
             if not result.valid:
@@ -346,7 +402,13 @@ class BinanceSquareSDK:
                 logger.info(f"create_article: validation warnings — {result.warnings}")
 
         ws = self._require_connection()
-        return await create_article(ws, title, body, cover_path=cover_path)
+        try:
+            response = await create_article(ws, title, body, cover_path=cover_path)
+            self._record_guard("post", success=response.get("success", False))
+            return response
+        except Exception as e:
+            self._record_guard("post", success=False, error=str(e))
+            raise
 
     async def quote_repost(
         self, post_id: str, comment: str = "", skip_validation: bool = False,
@@ -358,6 +420,9 @@ class BinanceSquareSDK:
         Returns:
             {success, original_post_id} or {success: False, validation_errors}
         """
+        if not await self._check_guard("quote_repost"):
+            return {"success": False, "error": "Guard denied: quote_repost"}
+
         if comment and not skip_validation:
             result = validate_quote(comment)
             if not result.valid:
@@ -369,7 +434,13 @@ class BinanceSquareSDK:
                 }
 
         ws = self._require_connection()
-        return await repost(ws, post_id, comment=comment)
+        try:
+            response = await repost(ws, post_id, comment=comment)
+            self._record_guard("quote_repost", success=response.get("success", False))
+            return response
+        except Exception as e:
+            self._record_guard("quote_repost", success=False, error=str(e))
+            raise
 
     async def follow_user(self, post_id: str) -> dict[str, Any]:
         """Follow the author of a post. Skips if already following.
@@ -377,8 +448,17 @@ class BinanceSquareSDK:
         Returns:
             {success, post_id, action: "followed"|"already_following"|"skipped"}
         """
+        if not await self._check_guard("follow"):
+            return {"success": False, "error": "Guard denied: follow"}
+
         ws = self._require_connection()
-        return await follow_author(ws, post_id)
+        try:
+            response = await follow_author(ws, post_id)
+            self._record_guard("follow", success=response.get("success", False))
+            return response
+        except Exception as e:
+            self._record_guard("follow", success=False, error=str(e))
+            raise
 
     async def like_post(self, post_id: str) -> dict[str, Any]:
         """Like a post via browser click.
@@ -386,17 +466,20 @@ class BinanceSquareSDK:
         Returns:
             {success, post_id}
         """
+        if not await self._check_guard("like"):
+            return {"success": False, "error": "Guard denied: like"}
+
         ws = self._require_connection()
         # Like via browser — navigate to post and click like button
         from src.session.browser_actions import _get_page
         from src.session import page_map
-        import asyncio
 
         pw, browser, page = await _get_page(ws)
         try:
             post_url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
             await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
             await asyncio.sleep(5)
+            await warm_up(page)
 
             # Try detail-level like first (comment pages), then card-level (posts)
             detail_like = page.locator(page_map.COMMENT_DETAIL_LIKE).first
@@ -405,20 +488,24 @@ class BinanceSquareSDK:
             try:
                 await detail_like.wait_for(state="visible", timeout=3_000)
                 await detail_like.scroll_into_view_if_needed()
+                await mouse_move_to(page, page_map.COMMENT_DETAIL_LIKE)
                 await asyncio.sleep(1)
                 await detail_like.click()
                 logger.info(f"Liked comment {post_id} (detail-thumb-up)")
             except Exception:
                 await card_like.wait_for(state="visible", timeout=10_000)
                 await card_like.scroll_into_view_if_needed()
+                await mouse_move_to(page, page_map.POST_LIKE_BUTTON)
                 await asyncio.sleep(1)
                 await card_like.click()
                 logger.info(f"Liked post {post_id} (thumb-up-button)")
 
             await asyncio.sleep(3)
+            self._record_guard("like", success=True)
             return {"success": True, "post_id": post_id}
         except Exception as e:
             logger.error(f"Like failed on {post_id}: {e}")
+            self._record_guard("like", success=False, error=str(e))
             return {"success": False, "error": str(e)}
         finally:
             await pw.stop()
@@ -477,7 +564,6 @@ class BinanceSquareSDK:
         Returns:
             Absolute path to saved screenshot file (data/screenshots/<timestamp>.png)
         """
-        import asyncio
         import os
         import time
         from src.session.browser_actions import _get_page
@@ -533,7 +619,6 @@ class BinanceSquareSDK:
         Returns:
             Absolute path to saved screenshot
         """
-        import asyncio
         import os
         import time
         from src.session.browser_actions import _get_page

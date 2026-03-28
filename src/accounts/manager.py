@@ -21,6 +21,7 @@ class LimitsConfig(BaseModel):
     likes_per_day: list[int] = [30, 60]
     comments_per_day: list[int] = [12, 24]
     reposts_per_day: list[int] = [0, 1]
+    follows_per_day: list[int] = [5, 15]
     min_interval_sec: int = 90
 
 

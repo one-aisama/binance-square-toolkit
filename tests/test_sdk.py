@@ -2,9 +2,10 @@
 
 import pytest
 import httpx
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.sdk import BinanceSquareSDK, SDKError
+from src.runtime.guard import ActionGuard, Verdict, GuardDecision
 
 
 def _mock_response(json_data, status_code=200):
@@ -204,3 +205,126 @@ async def test_get_market_data_calls_content_module(sdk):
     mock_fn.assert_called_once_with(["BTC", "ETH"])
     assert "BTC" in result
     assert "ETH" in result
+
+
+# ---- Guard integration ----
+
+
+def _make_mock_guard(verdict: Verdict, **kwargs) -> MagicMock:
+    """Create a mock ActionGuard returning the given verdict."""
+    guard = MagicMock(spec=ActionGuard)
+    decision = GuardDecision(verdict=verdict, **kwargs)
+    guard.check = AsyncMock(return_value=decision)
+    guard.record = MagicMock()
+    return guard
+
+
+@pytest.fixture
+def sdk_with_guard_allow():
+    guard = _make_mock_guard(Verdict.ALLOW)
+    sdk = BinanceSquareSDK(profile_serial="1", guard=guard)
+    sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
+    return sdk
+
+
+@pytest.fixture
+def sdk_with_guard_denied():
+    guard = _make_mock_guard(Verdict.DENIED, reason="Daily limit reached")
+    sdk = BinanceSquareSDK(profile_serial="1", guard=guard)
+    sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
+    return sdk
+
+
+@pytest.fixture
+def sdk_with_guard_session_over():
+    guard = _make_mock_guard(Verdict.SESSION_OVER, reason="Too many failures")
+    sdk = BinanceSquareSDK(profile_serial="1", guard=guard)
+    sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
+    return sdk
+
+
+def test_constructor_guard_is_none_by_default():
+    sdk = BinanceSquareSDK(profile_serial="1")
+    assert sdk._guard is None
+
+
+def test_constructor_accepts_guard():
+    guard = _make_mock_guard(Verdict.ALLOW)
+    sdk = BinanceSquareSDK(profile_serial="1", guard=guard)
+    assert sdk._guard is guard
+
+
+async def test_check_guard_allows_when_no_guard(sdk):
+    result = await sdk._check_guard("like")
+    assert result is True
+
+
+async def test_check_guard_allows_when_verdict_allow(sdk_with_guard_allow):
+    result = await sdk_with_guard_allow._check_guard("like")
+    assert result is True
+
+
+async def test_check_guard_denies_when_verdict_denied(sdk_with_guard_denied):
+    result = await sdk_with_guard_denied._check_guard("like")
+    assert result is False
+
+
+async def test_check_guard_denies_when_session_over(sdk_with_guard_session_over):
+    result = await sdk_with_guard_session_over._check_guard("like")
+    assert result is False
+
+
+async def test_like_post_denied_by_guard(sdk_with_guard_denied):
+    result = await sdk_with_guard_denied.like_post(post_id="123")
+    assert result["success"] is False
+    assert "Guard denied" in result["error"]
+
+
+async def test_comment_denied_by_guard(sdk_with_guard_denied):
+    result = await sdk_with_guard_denied.comment_on_post(post_id="123", text="test")
+    assert result["success"] is False
+    assert "Guard denied" in result["error"]
+
+
+async def test_create_post_denied_by_guard(sdk_with_guard_denied):
+    result = await sdk_with_guard_denied.create_post(text="test", skip_validation=True)
+    assert result["success"] is False
+    assert "Guard denied" in result["error"]
+
+
+async def test_create_article_denied_by_guard(sdk_with_guard_denied):
+    result = await sdk_with_guard_denied.create_article(
+        title="Test", body="Test body", skip_validation=True,
+    )
+    assert result["success"] is False
+    assert "Guard denied" in result["error"]
+
+
+async def test_quote_repost_denied_by_guard(sdk_with_guard_denied):
+    result = await sdk_with_guard_denied.quote_repost(post_id="123", skip_validation=True)
+    assert result["success"] is False
+    assert "Guard denied" in result["error"]
+
+
+async def test_follow_user_denied_by_guard(sdk_with_guard_denied):
+    result = await sdk_with_guard_denied.follow_user(post_id="123")
+    assert result["success"] is False
+    assert "Guard denied" in result["error"]
+
+
+async def test_comment_records_success_in_guard(sdk_with_guard_allow):
+    mock_result = {"success": True, "post_id": "123", "followed": False}
+    with patch("src.sdk.comment_on_post", new_callable=AsyncMock, return_value=mock_result):
+        await sdk_with_guard_allow.comment_on_post(post_id="123", text="great analysis")
+    sdk_with_guard_allow._guard.record.assert_called_once_with("comment", True, None)
+
+
+async def test_follow_records_success_in_guard(sdk_with_guard_allow):
+    mock_result = {"success": True, "post_id": "123", "action": "followed"}
+    with patch("src.sdk.follow_author", new_callable=AsyncMock, return_value=mock_result):
+        await sdk_with_guard_allow.follow_user(post_id="123")
+    sdk_with_guard_allow._guard.record.assert_called_once_with("follow", True, None)
+
+
+async def test_record_guard_noop_without_guard(sdk):
+    sdk._record_guard("like", success=True)  # should not raise

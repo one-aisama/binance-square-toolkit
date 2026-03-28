@@ -12,6 +12,7 @@ from typing import Any
 from playwright.async_api import async_playwright, Page
 
 from src.session import page_map
+from src.runtime.behavior import warm_up, mouse_move_to
 
 logger = logging.getLogger("bsq.session")
 
@@ -85,6 +86,7 @@ async def create_post(
         logger.info("Navigating to Binance Square...")
         await page.goto(page_map.SQUARE_URL, wait_until="domcontentloaded", timeout=60_000)
         await asyncio.sleep(5)
+        await warm_up(page)
 
         # 1. Click editor to focus
         editor = page.locator(page_map.COMPOSE_EDITOR).first
@@ -126,6 +128,7 @@ async def create_post(
         await asyncio.sleep(2)
         post_btn = page.locator(page_map.COMPOSE_INLINE_POST_BUTTON).first
         await post_btn.wait_for(state="visible", timeout=5_000)
+        await mouse_move_to(page, page_map.COMPOSE_INLINE_POST_BUTTON)
         await asyncio.sleep(1)
         await post_btn.click()
         await asyncio.sleep(10)
@@ -226,6 +229,7 @@ async def create_article(
         logger.info("Navigating to Binance Square...")
         await page.goto(page_map.SQUARE_URL, wait_until="domcontentloaded", timeout=60_000)
         await asyncio.sleep(5)
+        await warm_up(page)
 
         # Dismiss cookie banner
         try:
@@ -332,6 +336,7 @@ async def repost(ws_endpoint: str, post_id: str, comment: str = "") -> dict[str,
         logger.info(f"Navigating to post: {post_url}")
         await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
         await asyncio.sleep(5)
+        await warm_up(page)
 
         # Dismiss cookie banner if present
         try:
@@ -387,6 +392,7 @@ async def comment_on_post(ws_endpoint: str, post_id: str, comment_text: str) -> 
         logger.info(f"Navigating to post for comment: {post_url}")
         await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
         await asyncio.sleep(5)
+        await warm_up(page)
 
         # Scroll down to make reply input visible
         await page.evaluate("window.scrollBy(0, 800)")
@@ -418,6 +424,7 @@ async def comment_on_post(ws_endpoint: str, post_id: str, comment_text: str) -> 
 
         # Click Reply
         reply_btn = page.locator(page_map.POST_REPLY_BUTTON).first
+        await mouse_move_to(page, page_map.POST_REPLY_BUTTON)
         await reply_btn.click()
         await asyncio.sleep(3)
 
@@ -462,6 +469,7 @@ async def follow_author(ws_endpoint: str, post_id: str) -> dict[str, Any]:
         logger.info(f"Navigating to post for follow: {post_url}")
         await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
         await asyncio.sleep(5)
+        await warm_up(page)
 
         # Find Follow button
         follow_btn = page.locator(page_map.FOLLOW_BUTTON).first
@@ -478,6 +486,7 @@ async def follow_author(ws_endpoint: str, post_id: str) -> dict[str, Any]:
             return {"success": True, "post_id": post_id, "action": "already_following"}
 
         # Safe to click — button says "Follow"
+        await mouse_move_to(page, page_map.FOLLOW_BUTTON)
         await follow_btn.click()
         await asyncio.sleep(3)
         logger.info(f"Followed author of post {post_id}")
