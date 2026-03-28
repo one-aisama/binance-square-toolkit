@@ -799,19 +799,22 @@ async def get_post_comments(ws_endpoint: str, post_id: str, limit: int = 20) -> 
         await pw.stop()
 
 
-async def get_my_comment_replies(ws_endpoint: str, username: str = "aisama") -> list[dict[str, Any]]:
+async def get_my_comment_replies(
+    ws_endpoint: str, username: str = "aisama", max_replies: int = 5
+) -> list[dict[str, Any]]:
     """Find replies to agent's comments by checking the profile Replies tab.
 
     Flow:
     1. Navigate to profile → Replies tab
     2. Scroll to load reply cards
     3. Find agent's cards where comment count > 0 (someone replied)
-    4. For each, click the card to navigate to the comment page
+    4. For each (up to max_replies), click the card to navigate to the comment page
     5. Read the replies there
 
     Args:
         ws_endpoint: CDP websocket endpoint
         username: Agent's Binance Square username
+        max_replies: Maximum number of reply cards to process (default 5)
 
     Returns:
         [{comment_text, comment_post_id, replies: [{author, author_handle, text}]}]
@@ -828,8 +831,8 @@ async def get_my_comment_replies(ws_endpoint: str, username: str = "aisama") -> 
         await replies_tab.click()
         await asyncio.sleep(4)
 
-        # Scroll to load
-        for _ in range(4):
+        # Scroll to load (limited — don't load entire history)
+        for _ in range(2):
             await page.evaluate("window.scrollBy(0, 700)")
             await asyncio.sleep(2)
 
@@ -877,7 +880,7 @@ async def get_my_comment_replies(ws_endpoint: str, username: str = "aisama") -> 
         # and read the replies there
         results = []
 
-        for card_info in cards_with_replies:
+        for card_info in cards_with_replies[:max_replies]:
             idx = card_info["index"]
             try:
                 # Re-navigate to profile Replies tab (page may have changed)
