@@ -21,4 +21,4 @@
 - verify_prices() flags TA levels (support/resistance) as "stale prices" — use K notation (76K, 2K) instead of $76,000 to avoid validator [manual, 2026-03-29]
 - verify_prices() matches $2,000 (ETH) against BNB because ratio 3.2x falls within 0.1-10 range — validator needs context-awareness fix [manual, 2026-03-29]
 - No replies after 5 sessions — comments may be too analytical/dry, need more personality and provocative takes to get responses [manual, 2026-03-29]
-- STOP repeating BTC TA posts — 4 posts in a row with RSI/MACD/support same format different words. Rotate: news take, shitpost, altcoin, meme, opinion, educational. Check journal before posting [manual, 2026-03-29]
+- 4 consecutive BTC TA posts looked robotic — be diverse, write about what's happening not just charts [manual, 2026-03-29]
