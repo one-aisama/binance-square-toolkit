@@ -225,7 +225,8 @@ def _make_mock_guard(verdict: Verdict, **kwargs) -> MagicMock:
 @pytest.fixture
 def sdk_with_guard_allow():
     guard = _make_mock_guard(Verdict.ALLOW)
-    sdk = BinanceSquareSDK(profile_serial="1", guard=guard)
+    sdk = BinanceSquareSDK(profile_serial="1")
+    sdk._guard = guard
     sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
     return sdk
 
@@ -233,7 +234,8 @@ def sdk_with_guard_allow():
 @pytest.fixture
 def sdk_with_guard_denied():
     guard = _make_mock_guard(Verdict.DENIED, reason="Daily limit reached")
-    sdk = BinanceSquareSDK(profile_serial="1", guard=guard)
+    sdk = BinanceSquareSDK(profile_serial="1")
+    sdk._guard = guard
     sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
     return sdk
 
@@ -241,40 +243,37 @@ def sdk_with_guard_denied():
 @pytest.fixture
 def sdk_with_guard_session_over():
     guard = _make_mock_guard(Verdict.SESSION_OVER, reason="Too many failures")
-    sdk = BinanceSquareSDK(profile_serial="1", guard=guard)
+    sdk = BinanceSquareSDK(profile_serial="1")
+    sdk._guard = guard
     sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
     return sdk
 
 
-def test_constructor_guard_is_none_by_default():
+def test_guard_is_none_before_connect():
     sdk = BinanceSquareSDK(profile_serial="1")
     assert sdk._guard is None
 
 
-def test_constructor_accepts_guard():
-    guard = _make_mock_guard(Verdict.ALLOW)
-    sdk = BinanceSquareSDK(profile_serial="1", guard=guard)
-    assert sdk._guard is guard
-
-
 async def test_check_guard_allows_when_no_guard(sdk):
-    result = await sdk._check_guard("like")
-    assert result is True
+    allowed, reason = await sdk._check_guard("like")
+    assert allowed is True
 
 
 async def test_check_guard_allows_when_verdict_allow(sdk_with_guard_allow):
-    result = await sdk_with_guard_allow._check_guard("like")
-    assert result is True
+    allowed, reason = await sdk_with_guard_allow._check_guard("like")
+    assert allowed is True
 
 
 async def test_check_guard_denies_when_verdict_denied(sdk_with_guard_denied):
-    result = await sdk_with_guard_denied._check_guard("like")
-    assert result is False
+    allowed, reason = await sdk_with_guard_denied._check_guard("like")
+    assert allowed is False
+    assert "Daily limit" in reason
 
 
 async def test_check_guard_denies_when_session_over(sdk_with_guard_session_over):
-    result = await sdk_with_guard_session_over._check_guard("like")
-    assert result is False
+    allowed, reason = await sdk_with_guard_session_over._check_guard("like")
+    assert allowed is False
+    assert "Too many failures" in reason
 
 
 async def test_like_post_denied_by_guard(sdk_with_guard_denied):

@@ -88,17 +88,22 @@ class ActionGuard:
         limits: LimitsConfig,
         account_id: str,
         max_session_actions: int = 30,
+        session_minimum: dict[str, int] | None = None,
     ):
         self._limiter = limiter
         self._limits = limits
         self._account_id = account_id
         self._max_session_actions = max_session_actions
+        self._session_minimum = session_minimum or {"like": 3, "comment": 1, "post": 1}
 
         # Session state (in-memory, reset each session)
         self._session_action_count = 0
         self._session_success_count = 0
         self._session_fail_count = 0
         self._session_start_time = time.time()
+
+        # Successful actions by type (for session minimum tracking)
+        self._success_by_type: dict[str, int] = {}
 
         # Cooldown tracking: action_type -> last execution timestamp
         self._last_action_time: dict[str, float] = {}
@@ -176,6 +181,7 @@ class ActionGuard:
 
         if success:
             self._session_success_count += 1
+            self._success_by_type[action_type] = self._success_by_type.get(action_type, 0) + 1
             self._failure_counters[action_type] = 0
             # Re-close circuit if it was open and action recovered
             if action_type in self._circuit_open:
@@ -200,6 +206,29 @@ class ActionGuard:
             if fallback not in self._circuit_open:
                 return fallback
         return None
+
+    def can_finish(self) -> tuple[bool, str]:
+        """Check if session minimum is met. Returns (can_finish, reason).
+
+        Agent cannot end session until minimum is fulfilled.
+        """
+        missing = []
+        for action_type, required in self._session_minimum.items():
+            done = self._success_by_type.get(action_type, 0)
+            if done < required:
+                missing.append(f"{action_type}: {done}/{required}")
+
+        if missing:
+            return False, f"Minimum not met: {', '.join(missing)}"
+        return True, "Minimum fulfilled — you are free to continue or stop"
+
+    def get_minimum_status(self) -> dict[str, dict[str, int]]:
+        """Return current progress toward session minimum."""
+        status = {}
+        for action_type, required in self._session_minimum.items():
+            done = self._success_by_type.get(action_type, 0)
+            status[action_type] = {"done": done, "required": required, "remaining": max(0, required - done)}
+        return status
 
     def get_session_stats(self) -> dict:
         """Return current session statistics."""

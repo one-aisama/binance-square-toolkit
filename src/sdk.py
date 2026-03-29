@@ -54,10 +54,12 @@ class BinanceSquareSDK:
     Agent uses this as the single entry point. All browser/API details hidden.
     """
 
-    def __init__(self, profile_serial: str = "1", guard: ActionGuard | None = None):
+    def __init__(self, profile_serial: str = "1", account_id: str = "default", db_path: str = "data/bsq.db"):
         self._serial = profile_serial
+        self._account_id = account_id
+        self._db_path = db_path
         self._ws_endpoint: str | None = None
-        self._guard = guard
+        self._guard: ActionGuard | None = None
         self._pw = None
         self._browser = None
         self._page = None
@@ -78,6 +80,7 @@ class BinanceSquareSDK:
             self._ws_endpoint = data["data"]["ws"]["puppeteer"]
             logger.info(f"Connected to active profile {self._serial}")
             await self._init_persistent_page()
+            self._init_guard()
             return
 
         # Profile not active — start it
@@ -96,6 +99,20 @@ class BinanceSquareSDK:
 
         # Create persistent Playwright page
         await self._init_persistent_page()
+        self._init_guard()
+
+    def _init_guard(self) -> None:
+        """Create guard with limits from account config. Always called on connect."""
+        from src.accounts.limiter import ActionLimiter
+        from src.accounts.manager import LimitsConfig
+        limiter = ActionLimiter(db_path=self._db_path)
+        limits = LimitsConfig()  # defaults, can be loaded from account yaml later
+        self._guard = ActionGuard(
+            limiter=limiter,
+            limits=limits,
+            account_id=self._account_id,
+        )
+        logger.info(f"Guard initialized for {self._account_id}")
 
     async def _init_persistent_page(self) -> None:
         """Create persistent Playwright connection. One page for entire session."""
@@ -120,35 +137,47 @@ class BinanceSquareSDK:
     def connected(self) -> bool:
         return self._ws_endpoint is not None
 
+    def can_finish(self) -> tuple[bool, str]:
+        """Check if session minimum is met. Agent calls this before ending session."""
+        if self._guard:
+            return self._guard.can_finish()
+        return True, "No guard"
+
+    def get_minimum_status(self) -> dict:
+        """Get progress toward session minimum."""
+        if self._guard:
+            return self._guard.get_minimum_status()
+        return {}
+
     def _require_connection(self) -> str:
         if not self._ws_endpoint:
             raise SDKError("Not connected. Call sdk.connect() first.")
         return self._ws_endpoint
 
-    async def _check_guard(self, action_type: str) -> bool:
-        """Check guard before action. Returns True if allowed, False if denied.
+    async def _check_guard(self, action_type: str) -> tuple[bool, str]:
+        """Check guard before action. Returns (allowed, reason).
 
-        If guard not set, always allows.
+        Guard is always present (created on connect).
         """
         if not self._guard:
-            return True
+            return True, ""
 
         decision = await self._guard.check(action_type)
         if decision.verdict == Verdict.ALLOW:
-            return True
+            return True, ""
         elif decision.verdict == Verdict.WAIT:
             await asyncio.sleep(decision.wait_seconds)
             decision = await self._guard.check(action_type)
-            return decision.verdict == Verdict.ALLOW
+            if decision.verdict == Verdict.ALLOW:
+                return True, ""
+            return False, decision.reason
         elif decision.verdict == Verdict.DENIED:
             logger.warning(f"Guard denied {action_type}: {decision.reason}")
-            if decision.fallback_action:
-                logger.info(f"Fallback suggested: {decision.fallback_action}")
-            return False
+            return False, decision.reason
         elif decision.verdict == Verdict.SESSION_OVER:
             logger.error(f"Guard: session over — {decision.reason}")
-            return False
-        return False
+            return False, decision.reason
+        return False, "Unknown guard verdict"
 
     def _record_guard(self, action_type: str, success: bool, error: str | None = None):
         """Record action result in guard if guard is set."""
@@ -322,8 +351,9 @@ class BinanceSquareSDK:
         Returns:
             {success, post_id, followed} or {success: False, validation_errors}
         """
-        if not await self._check_guard("comment"):
-            return {"success": False, "error": "Guard denied: comment"}
+        allowed, reason = await self._check_guard("comment")
+        if not allowed:
+            return {"success": False, "error": f"Guard denied: comment — {reason}"}
 
         if not skip_validation:
             result = validate_comment(text)
@@ -370,8 +400,9 @@ class BinanceSquareSDK:
         Returns:
             {success, post_id, response} or {success: False, validation_errors, validation_warnings}
         """
-        if not await self._check_guard("post"):
-            return {"success": False, "error": "Guard denied: post"}
+        allowed, reason = await self._check_guard("post")
+        if not allowed:
+            return {"success": False, "error": f"Guard denied: post — {reason}"}
 
         if not skip_validation:
             result = validate_post(text, recent_posts=recent_posts)
@@ -408,8 +439,9 @@ class BinanceSquareSDK:
         Returns:
             {success, post_id, response} or {success: False, validation_errors, validation_warnings}
         """
-        if not await self._check_guard("post"):
-            return {"success": False, "error": "Guard denied: post"}
+        allowed, reason = await self._check_guard("post")
+        if not allowed:
+            return {"success": False, "error": f"Guard denied: post — {reason}"}
 
         if not skip_validation:
             result = validate_article(title, body)
@@ -442,8 +474,9 @@ class BinanceSquareSDK:
         Returns:
             {success, original_post_id} or {success: False, validation_errors}
         """
-        if not await self._check_guard("quote_repost"):
-            return {"success": False, "error": "Guard denied: quote_repost"}
+        allowed, reason = await self._check_guard("quote_repost")
+        if not allowed:
+            return {"success": False, "error": f"Guard denied: quote_repost — {reason}"}
 
         if comment and not skip_validation:
             result = validate_quote(comment)
@@ -470,8 +503,9 @@ class BinanceSquareSDK:
         Returns:
             {success, post_id, action: "followed"|"already_following"|"skipped"}
         """
-        if not await self._check_guard("follow"):
-            return {"success": False, "error": "Guard denied: follow"}
+        allowed, reason = await self._check_guard("follow")
+        if not allowed:
+            return {"success": False, "error": f"Guard denied: follow — {reason}"}
 
         ws = self._require_connection()
         try:
@@ -526,8 +560,9 @@ class BinanceSquareSDK:
         Returns:
             {success, post_id}
         """
-        if not await self._check_guard("like"):
-            return {"success": False, "error": "Guard denied: like"}
+        allowed, reason = await self._check_guard("like")
+        if not allowed:
+            return {"success": False, "error": f"Guard denied: like — {reason}"}
 
         ws = self._require_connection()
         # Like via browser — navigate to post and click like button
