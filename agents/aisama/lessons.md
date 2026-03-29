@@ -12,5 +12,4 @@
 - Comments on mid-popularity posts (15-30 likes) go through cleanly, good visibility [manual, 2026-03-27]
 - Red market days = high engagement potential — people scroll more when anxious [manual, 2026-03-27]
 - Feed quality is mixed — lots of spam, need filtering before engagement [manual, 2026-03-27]
-- Post author replying = always reply back — keeps thread alive for their followers [manual, 2026-03-28]
 - 3+ comments on one influencer per session risks looking like stalking — max 2 [manual, 2026-03-28]
