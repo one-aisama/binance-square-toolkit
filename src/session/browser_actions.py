@@ -478,6 +478,138 @@ async def comment_on_post(ws_endpoint: str = None, post_id: str = "", comment_te
                 await pw.stop()
 
 
+async def engage_post(
+    ws_endpoint: str = None,
+    post_id: str = "",
+    like: bool = True,
+    comment_text: str | None = None,
+    follow: bool = False,
+    *,
+    page=None,
+) -> dict[str, Any]:
+    """Engage with a post in a single visit: like + comment + follow.
+
+    Opens the post page once, performs all requested actions, then moves on.
+    Much more efficient than calling like_post + comment_on_post separately.
+
+    Args:
+        ws_endpoint: CDP websocket (optional if page provided)
+        post_id: Target post ID
+        like: Whether to like the post (default True)
+        comment_text: Comment to leave (None = skip commenting)
+        follow: Whether to follow the author (default False)
+        page: Persistent page from SDK session
+
+    Returns:
+        {success, liked, commented, followed, post_id, errors: []}
+    """
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
+    result = {
+        "success": True,
+        "liked": False,
+        "commented": False,
+        "followed": False,
+        "post_id": post_id,
+        "errors": [],
+    }
+
+    try:
+        post_url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
+        logger.info(f"Engaging with post {post_id}")
+        await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
+        await asyncio.sleep(5)
+        await warm_up(page)
+
+        # 1. Like
+        if like:
+            try:
+                detail_like = page.locator(page_map.COMMENT_DETAIL_LIKE).first
+                card_like = page.locator(page_map.POST_LIKE_BUTTON).first
+
+                try:
+                    await detail_like.wait_for(state="visible", timeout=3_000)
+                    await detail_like.scroll_into_view_if_needed()
+                    await mouse_move_to(page, page_map.COMMENT_DETAIL_LIKE)
+                    await asyncio.sleep(1)
+                    await detail_like.click()
+                except Exception:
+                    await card_like.wait_for(state="visible", timeout=10_000)
+                    await card_like.scroll_into_view_if_needed()
+                    await mouse_move_to(page, page_map.POST_LIKE_BUTTON)
+                    await asyncio.sleep(1)
+                    await card_like.click()
+
+                result["liked"] = True
+                logger.info(f"Liked post {post_id}")
+                await asyncio.sleep(2)
+            except Exception as e:
+                result["errors"].append(f"like: {e}")
+                logger.warning(f"Like failed on {post_id}: {e}")
+
+        # 2. Comment
+        if comment_text:
+            try:
+                await page.evaluate("window.scrollBy(0, 800)")
+                await asyncio.sleep(2)
+
+                reply_input = page.locator(page_map.POST_REPLY_INPUT).first
+                await reply_input.scroll_into_view_if_needed()
+                await asyncio.sleep(1)
+                await reply_input.click()
+                await asyncio.sleep(1)
+                await page.keyboard.type(comment_text, delay=60)
+                await asyncio.sleep(2)
+
+                await mouse_move_to(page, page_map.POST_REPLY_BUTTON)
+                reply_btn = page.locator(page_map.POST_REPLY_BUTTON).first
+                await reply_btn.click()
+                await asyncio.sleep(3)
+
+                # Check for Follow & Reply popup
+                follow_reply_btn = page.locator(page_map.POST_FOLLOW_REPLY_POPUP).first
+                try:
+                    await follow_reply_btn.wait_for(state="visible", timeout=3_000)
+                    await follow_reply_btn.click()
+                    await asyncio.sleep(5)
+                    result["followed"] = True
+                    logger.info(f"Comment sent via Follow & Reply on {post_id}")
+                except Exception:
+                    await asyncio.sleep(3)
+                    logger.info(f"Comment sent on {post_id}")
+
+                result["commented"] = True
+            except Exception as e:
+                result["errors"].append(f"comment: {e}")
+                logger.warning(f"Comment failed on {post_id}: {e}")
+
+        # 3. Follow (only if not already followed via popup)
+        if follow and not result["followed"]:
+            try:
+                follow_btn = page.locator(page_map.FOLLOW_BUTTON).first
+                btn_text = await follow_btn.text_content(timeout=3_000)
+                if btn_text and "Following" not in btn_text:
+                    await mouse_move_to(page, page_map.FOLLOW_BUTTON)
+                    await follow_btn.click()
+                    await asyncio.sleep(3)
+                    result["followed"] = True
+                    logger.info(f"Followed author of {post_id}")
+                else:
+                    logger.info(f"Already following author of {post_id}")
+            except Exception as e:
+                result["errors"].append(f"follow: {e}")
+                logger.warning(f"Follow failed on {post_id}: {e}")
+
+        result["success"] = len(result["errors"]) == 0
+        return result
+
+    except Exception as e:
+        logger.error(f"engage_post failed on {post_id}: {e}")
+        return {"success": False, "post_id": post_id, "error": str(e), "errors": [str(e)]}
+    finally:
+        if _cleanup and pw:
+                await pw.stop()
+
+
 async def follow_author(ws_endpoint: str = None, post_id: str = "", *, page=None) -> dict[str, Any]:
     """Follow the author of a post. Checks if already following first.
 

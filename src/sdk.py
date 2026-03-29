@@ -28,6 +28,7 @@ from src.session.browser_actions import (
     comment_on_post,
     create_post,
     create_article,
+    engage_post,
     repost,
     follow_author,
     get_user_profile,
@@ -480,6 +481,44 @@ class BinanceSquareSDK:
         except Exception as e:
             self._record_guard("follow", success=False, error=str(e))
             raise
+
+    async def engage_post(
+        self,
+        post_id: str,
+        like: bool = True,
+        comment: str | None = None,
+        follow: bool = False,
+    ) -> dict[str, Any]:
+        """Engage with a post in one visit: like + comment + follow.
+
+        Opens the post once, does everything, closes. Much more efficient
+        than calling like_post + comment_on_post + follow_user separately.
+
+        Returns:
+            {success, liked, commented, followed, post_id, errors: []}
+        """
+        ws = self._require_connection()
+        result = await engage_post(
+            ws, post_id, like=like, comment_text=comment, follow=follow, page=self._page
+        )
+
+        # Record each sub-action in guard
+        if result.get("liked"):
+            self._record_guard("like", success=True)
+        if result.get("commented"):
+            self._record_guard("comment", success=True)
+        if result.get("followed"):
+            self._record_guard("follow", success=True)
+
+        for err in result.get("errors", []):
+            if err.startswith("like:"):
+                self._record_guard("like", success=False, error=err)
+            elif err.startswith("comment:"):
+                self._record_guard("comment", success=False, error=err)
+            elif err.startswith("follow:"):
+                self._record_guard("follow", success=False, error=err)
+
+        return result
 
     async def like_post(self, post_id: str) -> dict[str, Any]:
         """Like a post via browser click.
