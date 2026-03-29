@@ -57,6 +57,9 @@ class BinanceSquareSDK:
         self._serial = profile_serial
         self._ws_endpoint: str | None = None
         self._guard = guard
+        self._pw = None
+        self._browser = None
+        self._page = None
 
     # ---- Connection ----
 
@@ -73,6 +76,7 @@ class BinanceSquareSDK:
         if data.get("code") == 0 and data.get("data", {}).get("status") == "Active":
             self._ws_endpoint = data["data"]["ws"]["puppeteer"]
             logger.info(f"Connected to active profile {self._serial}")
+            await self._init_persistent_page()
             return
 
         # Profile not active — start it
@@ -89,8 +93,25 @@ class BinanceSquareSDK:
         self._ws_endpoint = data["data"]["ws"]["puppeteer"]
         logger.info(f"Started and connected to profile {self._serial}")
 
+        # Create persistent Playwright page
+        await self._init_persistent_page()
+
+    async def _init_persistent_page(self) -> None:
+        """Create persistent Playwright connection. One page for entire session."""
+        from playwright.async_api import async_playwright
+        self._pw = await async_playwright().start()
+        self._browser = await self._pw.chromium.connect_over_cdp(self._ws_endpoint)
+        context = self._browser.contexts[0] if self._browser.contexts else await self._browser.new_context()
+        self._page = context.pages[0] if context.pages else await context.new_page()
+        logger.info("Persistent page created")
+
     async def disconnect(self) -> None:
-        """Release connection. Does NOT close the browser — AdsPower manages that."""
+        """Release connection and close persistent page."""
+        if self._pw:
+            await self._pw.stop()
+            self._pw = None
+            self._browser = None
+            self._page = None
         self._ws_endpoint = None
         logger.info(f"Disconnected from profile {self._serial}")
 
@@ -149,7 +170,7 @@ class BinanceSquareSDK:
              is_following, recent_posts: [{post_id, text_preview}]}
         """
         ws = self._require_connection()
-        return await get_user_profile(ws, username)
+        return await get_user_profile(ws, username, page=self._page)
 
     async def get_post_stats(self, post_id: str) -> dict[str, Any]:
         """Fetch engagement stats for a specific post.
@@ -163,7 +184,7 @@ class BinanceSquareSDK:
             {post_id, likes, comments, quotes, title_preview}
         """
         ws = self._require_connection()
-        return await get_post_stats(ws, post_id)
+        return await get_post_stats(ws, post_id, page=self._page)
 
     async def get_post_comments(self, post_id: str, limit: int = 20) -> list[dict[str, Any]]:
         """Fetch comments on a specific post.
@@ -179,7 +200,7 @@ class BinanceSquareSDK:
             [{author, text}]
         """
         ws = self._require_connection()
-        return await get_post_comments(ws, post_id, limit=limit)
+        return await get_post_comments(ws, post_id, limit=limit, page=self._page)
 
     async def get_my_comment_replies(self, username: str = "aisama") -> list[dict[str, Any]]:
         """Find replies to agent's comments on other people's posts.
@@ -198,7 +219,7 @@ class BinanceSquareSDK:
               replies: [{author, author_handle, text}]}]
         """
         ws = self._require_connection()
-        return await get_my_comment_replies(ws, username=username)
+        return await get_my_comment_replies(ws, username=username, page=self._page)
 
     async def get_my_stats(self) -> dict[str, Any]:
         """Fetch own profile stats from Creator Center.
@@ -210,7 +231,7 @@ class BinanceSquareSDK:
              dashboard: {period, published, followers_gained, views, likes, comments, shares, quotes}}
         """
         ws = self._require_connection()
-        return await get_my_stats(ws)
+        return await get_my_stats(ws, page=self._page)
 
     async def get_feed_posts(self, count: int = 20, tab: str = "recommended") -> list[dict[str, Any]]:
         """Get posts from feed for agent to review and decide on.
@@ -218,7 +239,7 @@ class BinanceSquareSDK:
         Returns list of: {post_id, author, text, like_count}
         """
         ws = self._require_connection()
-        return await collect_feed_posts(ws, count=count, tab=tab)
+        return await collect_feed_posts(ws, count=count, tab=tab, page=self._page)
 
     async def get_trending_coins(self, limit: int = 10) -> list[dict[str, Any]]:
         """Get top coins by market cap with 24h change from CoinGecko.
@@ -317,7 +338,7 @@ class BinanceSquareSDK:
 
         ws = self._require_connection()
         try:
-            response = await comment_on_post(ws, post_id, text)
+            response = await comment_on_post(ws, post_id, text, page=self._page)
             self._record_guard("comment", success=response.get("success", False))
             return response
         except Exception as e:
@@ -365,7 +386,7 @@ class BinanceSquareSDK:
 
         ws = self._require_connection()
         try:
-            response = await create_post(ws, text, coin=coin, sentiment=sentiment, image_path=image_path)
+            response = await create_post(ws, text, coin=coin, sentiment=sentiment, image_path=image_path, page=self._page)
             self._record_guard("post", success=response.get("success", False))
             return response
         except Exception as e:
@@ -403,7 +424,7 @@ class BinanceSquareSDK:
 
         ws = self._require_connection()
         try:
-            response = await create_article(ws, title, body, cover_path=cover_path)
+            response = await create_article(ws, title, body, cover_path=cover_path, page=self._page)
             self._record_guard("post", success=response.get("success", False))
             return response
         except Exception as e:
@@ -435,7 +456,7 @@ class BinanceSquareSDK:
 
         ws = self._require_connection()
         try:
-            response = await repost(ws, post_id, comment=comment)
+            response = await repost(ws, post_id, comment=comment, page=self._page)
             self._record_guard("quote_repost", success=response.get("success", False))
             return response
         except Exception as e:
@@ -453,7 +474,7 @@ class BinanceSquareSDK:
 
         ws = self._require_connection()
         try:
-            response = await follow_author(ws, post_id)
+            response = await follow_author(ws, post_id, page=self._page)
             self._record_guard("follow", success=response.get("success", False))
             return response
         except Exception as e:
@@ -471,10 +492,9 @@ class BinanceSquareSDK:
 
         ws = self._require_connection()
         # Like via browser — navigate to post and click like button
-        from src.session.browser_actions import _get_page
         from src.session import page_map
 
-        pw, browser, page = await _get_page(ws)
+        page = self._page
         try:
             post_url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
             await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
@@ -507,8 +527,6 @@ class BinanceSquareSDK:
             logger.error(f"Like failed on {post_id}: {e}")
             self._record_guard("like", success=False, error=str(e))
             return {"success": False, "error": str(e)}
-        finally:
-            await pw.stop()
 
 
     async def download_image(self, image_url: str, filename: str | None = None) -> str:
@@ -566,10 +584,9 @@ class BinanceSquareSDK:
         """
         import os
         import time
-        from src.session.browser_actions import _get_page
 
-        ws = self._require_connection()
-        pw, browser, page = await _get_page(ws)
+        self._require_connection()
+        page = self._page
 
         screenshots_dir = os.path.join("data", "screenshots")
         os.makedirs(screenshots_dir, exist_ok=True)
@@ -601,8 +618,6 @@ class BinanceSquareSDK:
         except Exception as e:
             logger.error(f"take_screenshot: {e}, url={url}")
             raise SDKError(f"Screenshot failed: {e}") from e
-        finally:
-            await pw.stop()
 
 
     async def screenshot_chart(self, symbol: str = "BTC_USDT", timeframe: str = "1D") -> str:
@@ -621,10 +636,9 @@ class BinanceSquareSDK:
         """
         import os
         import time
-        from src.session.browser_actions import _get_page
 
-        ws = self._require_connection()
-        pw, browser, page = await _get_page(ws)
+        self._require_connection()
+        page = self._page
 
         screenshots_dir = os.path.join("data", "screenshots")
         os.makedirs(screenshots_dir, exist_ok=True)
@@ -673,8 +687,6 @@ class BinanceSquareSDK:
         except Exception as e:
             logger.error(f"screenshot_chart: {e}, symbol={symbol}")
             raise SDKError(f"Chart screenshot failed: {e}") from e
-        finally:
-            await pw.stop()
 
 
 class SDKError(Exception):

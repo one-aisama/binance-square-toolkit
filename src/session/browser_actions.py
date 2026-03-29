@@ -19,17 +19,36 @@ logger = logging.getLogger("bsq.session")
 
 
 
-async def _get_page(ws_endpoint: str) -> tuple:
+async def _connect_browser(ws_endpoint: str) -> tuple:
     """Connect to AdsPower browser and return (playwright, browser, page).
 
-    Uses the existing first tab (context.pages[0]) so the user can see
-    what's happening. Caller must stop pw when done — do NOT close the page.
+    For standalone use only. When called from SDK with persistent session,
+    SDK passes page= directly and this function is not called.
     """
     pw = await async_playwright().start()
     browser = await pw.chromium.connect_over_cdp(ws_endpoint)
     context = browser.contexts[0] if browser.contexts else await browser.new_context()
     page = context.pages[0] if context.pages else await context.new_page()
     return pw, browser, page
+
+
+def _setup_page(ws_endpoint: str = None, page=None):
+    """Helper: returns (need_cleanup, page_or_None).
+    If page provided, use it. Otherwise connect via ws_endpoint.
+    """
+    if page is not None:
+        return False, None  # no cleanup needed, page already available
+    return True, None  # need to connect
+
+
+async def _get_page_or_use(ws_endpoint: str = None, *, page=None):
+    """Get page: use provided page or connect to browser.
+    Returns (pw_or_None, browser_or_None, page, needs_cleanup).
+    """
+    if page is not None:
+        return None, None, page, False
+    pw, browser, pg = await _connect_browser(ws_endpoint)
+    return pw, browser, pg, True
 
 
 async def _type_with_hashtag_handling(page: Page, text: str, delay: int = 60):
@@ -62,11 +81,13 @@ async def _type_with_hashtag_handling(page: Page, text: str, delay: int = 60):
 
 
 async def create_post(
-    ws_endpoint: str,
-    text: str,
+    ws_endpoint: str = None,
+    text: str = "",
     coin: str | None = None,
     sentiment: str | None = None,
     image_path: str | None = None,
+    *,
+    page=None,
 ) -> dict[str, Any]:
     """Create a post on Binance Square via browser automation.
 
@@ -80,7 +101,7 @@ async def create_post(
     Returns:
         dict with success status and any captured post data
     """
-    pw, browser, page = await _get_page(ws_endpoint)
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
     try:
         logger.info("Navigating to Binance Square...")
@@ -146,7 +167,8 @@ async def create_post(
         logger.error(f"Post creation failed: {e}")
         return {"success": False, "error": str(e)}
     finally:
-        await pw.stop()
+        if _cleanup and pw:
+                await pw.stop()
 
 
 async def _add_chart(page: Page, coin: str):
@@ -205,11 +227,13 @@ async def _attach_image_inline(page: Page, image_path: str):
 
 
 async def create_article(
-    ws_endpoint: str,
-    title: str,
-    body: str,
+    ws_endpoint: str = None,
+    title: str = "",
+    body: str = "",
     cover_path: str | None = None,
     image_paths: list[str] | None = None,
+    *,
+    page=None,
 ) -> dict[str, Any]:
     """Create an article on Binance Square via browser automation.
 
@@ -223,7 +247,7 @@ async def create_article(
     Returns:
         dict with success status
     """
-    pw, browser, page = await _get_page(ws_endpoint)
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
     try:
         logger.info("Navigating to Binance Square...")
@@ -316,10 +340,11 @@ async def create_article(
         logger.error(f"Article creation failed: {e}")
         return {"success": False, "error": str(e)}
     finally:
-        await pw.stop()
+        if _cleanup and pw:
+                await pw.stop()
 
 
-async def repost(ws_endpoint: str, post_id: str, comment: str = "") -> dict[str, Any]:
+async def repost(ws_endpoint: str = None, post_id: str = "", comment: str = "", *, page=None) -> dict[str, Any]:
     """Quote-repost a post on Binance Square via browser automation.
 
     Flow:
@@ -329,7 +354,7 @@ async def repost(ws_endpoint: str, post_id: str, comment: str = "") -> dict[str,
     4. Type comment if provided
     5. Click Post button
     """
-    pw, browser, page = await _get_page(ws_endpoint)
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
     try:
         post_url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
@@ -369,10 +394,11 @@ async def repost(ws_endpoint: str, post_id: str, comment: str = "") -> dict[str,
         logger.error(f"repost: {e}, post_id={post_id}")
         return {"success": False, "error": str(e)}
     finally:
-        await pw.stop()
+        if _cleanup and pw:
+                await pw.stop()
 
 
-async def comment_on_post(ws_endpoint: str, post_id: str, comment_text: str) -> dict[str, Any]:
+async def comment_on_post(ws_endpoint: str = None, post_id: str = "", comment_text: str = "", *, page=None) -> dict[str, Any]:
     """Comment on a post. Handles 'Follow & Reply' popup if author restricts comments to followers.
 
     Flow:
@@ -385,7 +411,7 @@ async def comment_on_post(ws_endpoint: str, post_id: str, comment_text: str) -> 
 
     IMPORTANT: Do NOT write comment again after "Follow & Reply" — the original text is already sent.
     """
-    pw, browser, page = await _get_page(ws_endpoint)
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
     try:
         post_url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
@@ -448,10 +474,11 @@ async def comment_on_post(ws_endpoint: str, post_id: str, comment_text: str) -> 
         logger.error(f"Comment failed on post {post_id}: {e}")
         return {"success": False, "error": str(e)}
     finally:
-        await pw.stop()
+        if _cleanup and pw:
+                await pw.stop()
 
 
-async def follow_author(ws_endpoint: str, post_id: str) -> dict[str, Any]:
+async def follow_author(ws_endpoint: str = None, post_id: str = "", *, page=None) -> dict[str, Any]:
     """Follow the author of a post. Checks if already following first.
 
     Flow:
@@ -462,7 +489,7 @@ async def follow_author(ws_endpoint: str, post_id: str) -> dict[str, Any]:
 
     IMPORTANT: If button says "Following", do NOT click — it will UNFOLLOW.
     """
-    pw, browser, page = await _get_page(ws_endpoint)
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
     try:
         post_url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
@@ -496,7 +523,8 @@ async def follow_author(ws_endpoint: str, post_id: str) -> dict[str, Any]:
         logger.error(f"Follow failed on post {post_id}: {e}")
         return {"success": False, "error": str(e)}
     finally:
-        await pw.stop()
+        if _cleanup and pw:
+                await pw.stop()
 
 
 async def _extract_post_text(page: Page) -> str:
@@ -526,9 +554,11 @@ async def _extract_author_name(page: Page) -> str:
 
 
 async def collect_feed_posts(
-    ws_endpoint: str,
+    ws_endpoint: str = None,
     count: int = 20,
     tab: str = "recommended",
+    *,
+    page=None,
 ) -> list[dict[str, Any]]:
     """Collect posts from Binance Square feed without interacting.
 
@@ -543,7 +573,7 @@ async def collect_feed_posts(
     Returns:
         List of dicts: {post_id, author, text, like_count}
     """
-    pw, browser, page = await _get_page(ws_endpoint)
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
     results: list[dict[str, Any]] = []
 
     try:
@@ -620,10 +650,11 @@ async def collect_feed_posts(
         logger.error(f"Feed collection failed: {e}")
         return results
     finally:
-        await pw.stop()
+        if _cleanup and pw:
+                await pw.stop()
 
 
-async def get_user_profile(ws_endpoint: str, username: str) -> dict[str, Any]:
+async def get_user_profile(ws_endpoint: str = None, username: str = "", *, page=None) -> dict[str, Any]:
     """Fetch public profile data for a Binance Square user.
 
     Args:
@@ -634,7 +665,7 @@ async def get_user_profile(ws_endpoint: str, username: str) -> dict[str, Any]:
         {username, name, bio, following, followers, liked, shared,
          is_following, recent_posts: [{post_id, text_preview}]}
     """
-    pw, browser, page = await _get_page(ws_endpoint)
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
     try:
         url = f"https://www.binance.com/en/square/profile/{username}"
@@ -734,10 +765,11 @@ async def get_user_profile(ws_endpoint: str, username: str) -> dict[str, Any]:
         logger.error(f"get_user_profile: {e}, username={username}")
         return {"username": username, "error": str(e)}
     finally:
-        await pw.stop()
+        if _cleanup and pw:
+                await pw.stop()
 
 
-async def get_post_comments(ws_endpoint: str, post_id: str, limit: int = 20) -> list[dict[str, Any]]:
+async def get_post_comments(ws_endpoint: str = None, post_id: str = "", limit: int = 20, *, page=None) -> list[dict[str, Any]]:
     """Fetch comments on a specific post using feed-buzz-card selectors.
 
     Navigates to post page, scrolls to load comments, and extracts
@@ -751,7 +783,7 @@ async def get_post_comments(ws_endpoint: str, post_id: str, limit: int = 20) -> 
     Returns:
         [{author, author_handle, text}]
     """
-    pw, browser, page = await _get_page(ws_endpoint)
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
     try:
         url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
@@ -796,11 +828,12 @@ async def get_post_comments(ws_endpoint: str, post_id: str, limit: int = 20) -> 
         logger.error(f"get_post_comments: {e}, post_id={post_id}")
         return []
     finally:
-        await pw.stop()
+        if _cleanup and pw:
+                await pw.stop()
 
 
 async def get_my_comment_replies(
-    ws_endpoint: str, username: str = "aisama", max_replies: int = 5
+    ws_endpoint: str = None, username: str = "aisama", max_replies: int = 5, *, page=None
 ) -> list[dict[str, Any]]:
     """Find replies to agent's comments by checking the profile Replies tab.
 
@@ -819,7 +852,7 @@ async def get_my_comment_replies(
     Returns:
         [{comment_text, comment_post_id, replies: [{author, author_handle, text}]}]
     """
-    pw, browser, page = await _get_page(ws_endpoint)
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
     try:
         profile_url = f"https://www.binance.com/en/square/profile/{username}"
@@ -963,10 +996,11 @@ async def get_my_comment_replies(
         logger.error(f"get_my_comment_replies: {e}")
         return []
     finally:
-        await pw.stop()
+        if _cleanup and pw:
+                await pw.stop()
 
 
-async def get_post_stats(ws_endpoint: str, post_id: str) -> dict[str, Any]:
+async def get_post_stats(ws_endpoint: str = None, post_id: str = "", *, page=None) -> dict[str, Any]:
     """Fetch engagement stats for a specific post.
 
     Args:
@@ -976,7 +1010,7 @@ async def get_post_stats(ws_endpoint: str, post_id: str) -> dict[str, Any]:
     Returns:
         {post_id, likes, comments, quotes, title_preview}
     """
-    pw, browser, page = await _get_page(ws_endpoint)
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
     try:
         url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
@@ -1021,17 +1055,18 @@ async def get_post_stats(ws_endpoint: str, post_id: str) -> dict[str, Any]:
         logger.error(f"get_post_stats: {e}, post_id={post_id}")
         return {"post_id": post_id, "error": str(e)}
     finally:
-        await pw.stop()
+        if _cleanup and pw:
+                await pw.stop()
 
 
-async def get_my_stats(ws_endpoint: str) -> dict[str, Any]:
+async def get_my_stats(ws_endpoint: str = None, *, page=None) -> dict[str, Any]:
     """Fetch own profile stats from Creator Center.
 
     Returns:
         {username, handle, bio, followers, following, liked, shared,
          dashboard: {period, published, followers_gained, views, likes}}
     """
-    pw, browser, page = await _get_page(ws_endpoint)
+    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
     try:
         await page.goto(
@@ -1108,4 +1143,5 @@ async def get_my_stats(ws_endpoint: str) -> dict[str, Any]:
         logger.error(f"get_my_stats: {e}")
         return {"error": str(e)}
     finally:
-        await pw.stop()
+        if _cleanup and pw:
+                await pw.stop()

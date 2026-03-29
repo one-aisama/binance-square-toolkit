@@ -45,7 +45,8 @@ async def test_connect_active_profile_sets_ws_endpoint(sdk):
             "ws": {"puppeteer": "ws://127.0.0.1:9222/devtools/browser/abc"},
         },
     })
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp), \
+         patch.object(sdk, "_init_persistent_page", new_callable=AsyncMock):
         await sdk.connect()
 
     assert sdk._ws_endpoint == "ws://127.0.0.1:9222/devtools/browser/abc"
@@ -71,7 +72,8 @@ async def test_connect_inactive_profile_starts_browser(sdk):
         call_count += 1
         return inactive_resp if call_count == 1 else start_resp
 
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=side_effect):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=side_effect), \
+         patch.object(sdk, "_init_persistent_page", new_callable=AsyncMock):
         await sdk.connect()
 
     assert sdk._ws_endpoint == "ws://127.0.0.1:9333/devtools/browser/def"
@@ -132,7 +134,7 @@ async def test_get_feed_posts_calls_collect_with_ws_endpoint(sdk):
     with patch("src.sdk.collect_feed_posts", new_callable=AsyncMock, return_value=mock_posts) as mock_fn:
         result = await sdk.get_feed_posts(count=10, tab="trending")
 
-    mock_fn.assert_called_once_with("ws://127.0.0.1:9222/devtools/browser/abc", count=10, tab="trending")
+    mock_fn.assert_called_once_with("ws://127.0.0.1:9222/devtools/browser/abc", count=10, tab="trending", page=None)
     assert result == mock_posts
 
 
@@ -146,7 +148,7 @@ async def test_comment_on_post_calls_browser_action(sdk):
     with patch("src.sdk.comment_on_post", new_callable=AsyncMock, return_value=mock_result) as mock_fn:
         result = await sdk.comment_on_post(post_id="123", text="great analysis")
 
-    mock_fn.assert_called_once_with("ws://127.0.0.1:9222/devtools/browser/abc", "123", "great analysis")
+    mock_fn.assert_called_once_with("ws://127.0.0.1:9222/devtools/browser/abc", "123", "great analysis", page=None)
     assert result["success"] is True
 
 
@@ -170,6 +172,7 @@ async def test_create_post_calls_browser_action(sdk):
         coin="BTC",
         sentiment="bullish",
         image_path=None,
+        page=None,
     )
     assert result["success"] is True
 
