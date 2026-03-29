@@ -285,3 +285,55 @@ def _normalize_for_comparison(text: str) -> str:
     text = re.sub(r"[\$#]\w+", "", text)  # Remove $CASHTAGS and #hashtags
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+# ---- Price verification ----
+
+# Pattern: $65,500 or $65500 or $2,023.39 or $0.0028
+_PRICE_PATTERN = re.compile(r"\$([0-9][0-9,]*\.?\d*)")
+
+
+def verify_prices(text: str, market_data: dict[str, dict]) -> list[str]:
+    """Check that dollar prices in text are close to actual market data.
+
+    Finds all $X,XXX patterns in text, tries to match them to known coin prices,
+    and flags any that are >10% off.
+
+    Args:
+        text: Post/comment text
+        market_data: {symbol: {price: float, ...}} from get_market_data()
+
+    Returns:
+        List of warning strings. Empty = all prices ok.
+    """
+    warnings = []
+    matches = _PRICE_PATTERN.findall(text)
+    if not matches or not market_data:
+        return warnings
+
+    # Build price lookup: {price_float: symbol}
+    known_prices = {}
+    for symbol, data in market_data.items():
+        if isinstance(data, dict) and "price" in data:
+            known_prices[symbol] = float(data["price"])
+
+    for raw_match in matches:
+        try:
+            mentioned_price = float(raw_match.replace(",", ""))
+        except ValueError:
+            continue
+
+        # Try to match this price to a known coin
+        for symbol, actual_price in known_prices.items():
+            if actual_price == 0:
+                continue
+            # Check if mentioned price is in the same order of magnitude
+            ratio = mentioned_price / actual_price
+            if 0.1 < ratio < 10:  # same ballpark
+                deviation = abs(mentioned_price - actual_price) / actual_price
+                if deviation > 0.10:  # >10% off
+                    warnings.append(
+                        f"Price ${raw_match} may be stale for {symbol} "
+                        f"(actual: ${actual_price:,.2f}, deviation: {deviation:.0%})"
+                    )
+    return warnings

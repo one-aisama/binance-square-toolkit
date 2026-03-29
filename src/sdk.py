@@ -40,7 +40,7 @@ from src.session.browser_actions import (
 from src.content.market_data import get_market_data, get_trending_coins
 from src.content.news import get_crypto_news, get_article_content
 from src.content.technical_analysis import get_ta_summary
-from src.content.validator import validate_post, validate_comment, validate_article, validate_quote
+from src.content.validator import validate_post, validate_comment, validate_article, validate_quote, verify_prices
 from src.runtime.behavior import warm_up, mouse_move_to
 
 logger = logging.getLogger("bsq.sdk")
@@ -415,6 +415,20 @@ class BinanceSquareSDK:
                 }
             if result.warnings:
                 logger.info(f"create_post: validation warnings — {result.warnings}")
+
+            # Verify prices in text against live market data
+            try:
+                market = await get_market_data(["BTC", "ETH", "SOL", "BNB"])
+                price_warnings = verify_prices(text, market)
+                if price_warnings:
+                    logger.warning(f"create_post: price verification warnings — {price_warnings}")
+                    return {
+                        "success": False,
+                        "validation_errors": price_warnings,
+                        "validation_warnings": [],
+                    }
+            except Exception as e:
+                logger.warning(f"create_post: price verification skipped — {e}")
 
         ws = self._require_connection()
         try:
