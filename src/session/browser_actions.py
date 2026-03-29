@@ -712,13 +712,52 @@ async def collect_feed_posts(
         await page.goto(page_map.SQUARE_URL, wait_until="domcontentloaded", timeout=60_000)
         await asyncio.sleep(5)
 
-        # Click tab
+        # Click tab on the current Square UI (<div class="tab-item">).
+        label = "Recommended" if tab == "recommended" else "Following"
         tab_selector = page_map.FEED_RECOMMENDED_TAB if tab == "recommended" else page_map.FEED_FOLLOWING_TAB
+        tab_switched = False
         try:
-            await page.locator(tab_selector).first.click(timeout=5_000)
-            await asyncio.sleep(3)
+            await page.wait_for_function('() => !!document.querySelector(".tab-item")', timeout=10_000)
+            current_active = await page.evaluate(r'''(label) => {
+                const items = Array.from(document.querySelectorAll('.tab-item'));
+                const match = items.find(el => (el.innerText || '').trim() === label);
+                return !!match && match.classList.contains('active');
+            }''', label)
+
+            if current_active:
+                tab_switched = True
+            else:
+                try:
+                    tab_el = page.locator(tab_selector).first
+                    await tab_el.wait_for(state="visible", timeout=3_000)
+                    await tab_el.scroll_into_view_if_needed()
+                    await tab_el.click(timeout=3_000)
+                    tab_switched = True
+                except Exception:
+                    tab_switched = await page.evaluate(r'''(label) => {
+                        const items = Array.from(document.querySelectorAll('.tab-item'));
+                        const match = items.find(el => (el.innerText || '').trim() === label);
+                        if (!match) return false;
+                        match.click();
+                        return true;
+                    }''', label)
+
+            if tab_switched:
+                try:
+                    await page.wait_for_function(r'''(label) => {
+                        const items = Array.from(document.querySelectorAll('.tab-item'));
+                        const match = items.find(el => (el.innerText || '').trim() === label);
+                        return !!match && match.classList.contains('active');
+                    }''', label, timeout=5_000)
+                except Exception:
+                    await asyncio.sleep(2)
+                else:
+                    await asyncio.sleep(3)
         except Exception:
-            logger.warning(f"{tab} tab not found, using default feed")
+            tab_switched = False
+
+        if not tab_switched:
+            logger.warning(f"{tab} tab not found, using current feed")
 
         # Scroll to load posts
         scrolls = max(3, count // 3)
@@ -969,7 +1008,7 @@ async def get_post_comments(ws_endpoint: str = None, post_id: str = "", limit: i
 
 
 async def get_my_comment_replies(
-    ws_endpoint: str = None, username: str = "aisama", max_replies: int = 5, *, page=None
+    ws_endpoint: str = None, username: str = "your-username", max_replies: int = 5, *, page=None
 ) -> list[dict[str, Any]]:
     """Find replies to agent's comments by checking the profile Replies tab.
 
@@ -1189,61 +1228,88 @@ async def get_my_stats(ws_endpoint: str = None, *, page=None) -> dict[str, Any]:
             wait_until="domcontentloaded",
             timeout=60_000,
         )
-        await asyncio.sleep(6)
+
+        try:
+            await page.wait_for_function(
+                r'''() => {
+                    const text = document.body.innerText || '';
+                    return text.includes('Creator Dashboard')
+                        && text.includes('Following')
+                        && text.includes('Followers')
+                        && text.includes('@');
+                }''',
+                timeout=20_000,
+            )
+        except Exception:
+            await asyncio.sleep(4)
+        else:
+            await asyncio.sleep(2)
 
         stats = await page.evaluate(r'''() => {
-            const result = {};
-            const lines = document.body.innerText.split('\n').map(l => l.trim()).filter(l => l);
+            const lines = document.body.innerText.split('\n').map(l => l.trim()).filter(Boolean);
+            const result = {dashboard: {}};
 
-            // Username and handle — first lines after nav
-            for (let i = 0; i < Math.min(lines.length, 20); i++) {
-                if (lines[i].startsWith('@')) {
-                    result.handle = lines[i];
-                    result.username = lines[i].replace('@', '');
-                    // Name is line before handle
-                    if (i > 0) result.name = lines[i - 1];
-                    // Bio is line after handle
-                    // Bio: skip known UI labels
-                    const skipLabels = ['Following', 'Followers', 'Create API Key',
-                                        'Creator Dashboard', 'Liked', 'Shared'];
-                    if (i + 1 < lines.length && lines[i + 1].length > 10
-                        && !skipLabels.includes(lines[i + 1])) {
-                        result.bio = lines[i + 1];
+            const handleIdx = lines.findIndex(l => l.startsWith('@'));
+            if (handleIdx !== -1) {
+                result.handle = lines[handleIdx];
+                result.username = lines[handleIdx].replace('@', '');
+                if (handleIdx > 0) result.name = lines[handleIdx - 1];
+                const skipLabels = new Set(['Create API Key', 'Following', 'Followers', 'Liked', 'Shared']);
+                for (let i = handleIdx + 1; i < Math.min(handleIdx + 6, lines.length); i++) {
+                    const bioLine = lines[i];
+                    if (skipLabels.has(bioLine)) continue;
+                    if (bioLine.length > 10) {
+                        result.bio = bioLine;
+                        break;
                     }
+                }
+            }
+
+            for (const label of ['Following', 'Followers', 'Liked', 'Shared']) {
+                const idx = lines.findIndex(l => l === label);
+                if (idx > 0) {
+                    result[label.toLowerCase()] = lines[idx - 1] || '0';
+                }
+            }
+
+            const dashStart = lines.findIndex(l => l === 'Creator Dashboard');
+            const dashEnd = lines.findIndex(l => l === 'My Published Content');
+            const dashLines = dashStart !== -1
+                ? lines.slice(dashStart, dashEnd !== -1 && dashEnd > dashStart ? dashEnd : lines.length)
+                : lines;
+
+            const periodLine = dashLines.find(l => l.startsWith('Period:'));
+            if (periodLine) {
+                result.dashboard.period = periodLine;
+            }
+
+            const dashLabels = {
+                'Published': 'published',
+                'Followers gained': 'followers_gained',
+                'Views': 'views',
+                'Likes': 'likes',
+                'Comments': 'comments',
+                'Shares': 'shares',
+                'Quotes': 'quotes',
+                'Live Duration': 'live_duration',
+            };
+
+            for (let i = 0; i < dashLines.length; i++) {
+                const key = dashLabels[dashLines[i]];
+                if (!key) continue;
+
+                let value = '';
+                for (let j = i + 1; j < dashLines.length; j++) {
+                    const candidate = dashLines[j];
+                    if (!candidate || dashLabels[candidate] || candidate.startsWith('Period:')) continue;
+                    value = candidate;
                     break;
                 }
-            }
 
-            // Profile stats: Following, Followers, Liked, Shared
-            const labelMap = {};
-            for (let i = 0; i < lines.length; i++) {
-                if (['Following', 'Followers', 'Liked', 'Shared'].includes(lines[i])) {
-                    labelMap[lines[i]] = i;
+                if (value) {
+                    result.dashboard[key] = value;
                 }
             }
-            for (const [label, idx] of Object.entries(labelMap)) {
-                result[label.toLowerCase()] = lines[idx - 1] || '0';
-            }
-
-            // Creator Dashboard stats (label on line N, value on line N+1)
-            result.dashboard = {};
-            const dashLabels = ['Published', 'Followers gained', 'Views', 'Likes',
-                                'Comments', 'Shares', 'Quotes', 'Live Duration'];
-            // Only parse dashboard section (after "Creator Dashboard" line)
-            let dashStart = lines.findIndex(l => l === 'Creator Dashboard');
-            let dashEnd = lines.findIndex(l => l === 'My Published Content');
-            if (dashEnd === -1) dashEnd = lines.length;
-            for (let i = dashStart; i < dashEnd; i++) {
-                for (const label of dashLabels) {
-                    if (lines[i] === label && i + 1 < dashEnd) {
-                        result.dashboard[label.toLowerCase().replace(' ', '_')] = lines[i + 1];
-                    }
-                }
-            }
-
-            // Period
-            const periodLine = lines.find(l => l.startsWith('Period:'));
-            if (periodLine) result.dashboard.period = periodLine;
 
             return result;
         }''')
@@ -1260,3 +1326,5 @@ async def get_my_stats(ws_endpoint: str = None, *, page=None) -> dict[str, Any]:
     finally:
         if _cleanup and pw:
                 await pw.stop()
+
+

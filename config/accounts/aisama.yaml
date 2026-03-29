@@ -1,0 +1,11 @@
+account_id: aisama
+persona_id: aisama
+binance_uid: ""
+adspower_profile_id: "your-adspower-profile-id"
+limits:
+  posts_per_day: [1, 3]
+  likes_per_day: [12, 30]
+  comments_per_day: [4, 10]
+  reposts_per_day: [0, 1]
+  follows_per_day: [1, 6]
+  min_interval_sec: 120

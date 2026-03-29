@@ -1,134 +1,150 @@
 # Binance Square Toolkit
 
-SDK / toolkit for managing Binance Square activity through AdsPower browser profiles, controlled by an AI agent (Claude, Codex, or any AI).
+An AI-agent-driven SDK for managing Binance Square activity. You give the project to Claude Code (or Codex), and it creates autonomous sub-agents that operate your Binance Square accounts — posting, commenting, liking, building relationships, growing your audience.
 
-**Software = hands. Agent = brain.**
-
-The software does not make decisions about what to post, when to post, or which posts to interact with. The AI agent receives tasks from a human, analyzes trends, generates content, and calls toolkit functions to execute actions on Binance Square.
+**This is not the final version**, but everything is functional and working.
 
 ## How It Works
 
+You don't write scripts or configure pipelines manually. You open this project in Claude Code or Codex, describe what you want, and the AI session handles the rest.
+
 ```
-Human gives task to Agent
-  -> Agent calls parse functions     -> receives trending topics
-  -> Agent calls market data         -> receives current prices
-  -> Agent generates content text    -> using AI (Claude/OpenAI)
-  -> Agent calls create_post()       -> toolkit publishes via browser
-  -> Agent calls like/comment/follow -> toolkit executes via httpx or browser
+You → Claude Code / Codex → reads the project → creates sub-agents
+                                                      ↓
+                              Each agent manages one Binance Square account
+                              Posts, comments, likes, follows, builds relationships
+                              Learns from results, adapts strategy over time
 ```
+
+Through a Claude Code or Codex session you can:
+- Set up agents with unique personalities and writing styles
+- Configure daily limits (how many posts, likes, comments per day)
+- Fix bugs or customize anything to your needs
+- Add new agents for additional Binance accounts
 
 ## Requirements
 
-- Python 3.12+
-- AdsPower anti-detect browser (running locally)
-- Playwright (installed via `playwright install chromium`)
-- API keys: Anthropic and/or OpenAI (for content generation)
+| What | Why |
+|------|-----|
+| **Python 3.12+** | Runtime |
+| **AdsPower** | Anti-detect browser — each agent needs its own browser profile with a logged-in Binance account |
+| **Claude Code or Codex** | The AI that reads this project and operates your agents |
+| **Binance account(s)** | One per agent, logged in through AdsPower profiles |
 
-## Setup
+### Optional
+| What | Why |
+|------|-----|
+| **Anthropic / OpenAI / DeepSeek API key** | For the built-in comment generator (CommentGenerator). Not required if your AI session generates content directly |
+| **Mobile proxies** | Recommended for multiple accounts — one proxy per AdsPower profile |
 
-1. Clone the repository and install dependencies:
+## Quick Start
+
+### 1. Clone and install
 
 ```bash
+git clone https://github.com/one-aisama/binance-square-toolkit.git
+cd binance-square-toolkit
 pip install -r requirements.txt
 playwright install chromium
 ```
 
-2. Create `.env` file in project root:
+### 2. Create `.env`
 
 ```
-ANTHROPIC_API_KEY=your-key-here
-OPENAI_API_KEY=your-key-here
-DEEPSEEK_API_KEY=your-key-here
 DB_PATH=data/bsq.db
+
+# Optional — only if using built-in CommentGenerator
+ANTHROPIC_API_KEY=your-key
+OPENAI_API_KEY=your-key
+DEEPSEEK_API_KEY=your-key
 ```
 
-3. Configure accounts:
+### 3. Set up AdsPower
 
-- Copy `config/accounts/_example.yaml` to `config/accounts/your_account.yaml`
-- Set `adspower_profile_id` to your AdsPower profile ID
-- Set `persona_id` to match one from `config/personas.yaml`
-- Adjust limits as needed
+- Install [AdsPower](https://www.adspower.com/)
+- Create a browser profile
+- Log into your Binance account through that profile
+- Note the profile ID from AdsPower
 
-4. Start AdsPower and ensure at least one browser profile is configured.
+### 4. Open in Claude Code
+
+```bash
+claude  # or open in Codex
+```
+
+Tell it: *"Read the project. Set up an agent for my AdsPower profile [your-profile-id]. Give it a personality and start a session."*
+
+That's it. Claude reads CLAUDE.md, understands the architecture, creates the agent config, and runs it.
+
+## What the Agents Do
+
+Each agent operates autonomously:
+- **Reads the market** — prices, trends, technical analysis, news
+- **Browses the feed** — finds posts worth engaging with (filters spam automatically)
+- **Comments** — data-backed, personality-driven, on posts by influencers with real audiences
+- **Posts** — with charts, images, $CASHTAGS, market sentiment
+- **Builds relationships** — tracks which creators respond, focuses effort where it works
+- **Learns** — metrics are collected after each action, performance data shapes future strategy
+
+## Architecture
+
+```
+┌─────────────────────────────────────────┐
+│         STRATEGY (LLM — brain)          │
+│   analyst → planner → reviewer          │
+└──────────────────┬──────────────────────┘
+                   │ session plan
+┌──────────────────▼──────────────────────┐
+│         RUNTIME (code — guardrails)     │
+│   limits, circuit breaker, cooldowns    │
+│   agent cannot bypass this layer        │
+└──────────────────┬──────────────────────┘
+                   │ controlled actions
+┌──────────────────▼──────────────────────┐
+│              SDK (hands)                │
+│   post, comment, like, follow, parse    │
+└──────────────────┬──────────────────────┘
+                   │ results
+┌──────────────────▼──────────────────────┐
+│      METRICS + MEMORY (eyes + memory)   │
+│   collect outcomes → score → learn      │
+└─────────────────────────────────────────┘
+```
+
+- **Runtime** enforces limits in code — the agent literally cannot exceed daily action limits or ignore cooldowns
+- **Metrics** are collected hours after each action (views, likes, replies) and aggregated automatically
+- **Memory** compacts session logs into actionable insights — what content type works, which creators respond, best times to post
 
 ## Project Structure
 
 ```
-binance_square/
-  config/
-    accounts/           Per-account YAML configs
-    personas.yaml       6 persona definitions (style, topics)
-    settings.yaml       Global settings (intervals, AI provider)
-    content_rules.yaml  Content generation rules (for agent to follow)
+binance-square-toolkit/
   src/
-    session/            AdsPower client, credential harvesting, browser actions
-    bapi/               HTTP client for Binance bapi (parsing, likes)
-    parser/             Feed parsing, trend ranking
-    content/            AI content generation, publish queue, market data
-    activity/           Likes, comments, reposts, target selection
-    accounts/           Config loading, daily limits, anti-detection
-    db/                 SQLite schema and init
-    scheduler/          APScheduler orchestration (optional)
-    main.py             Entry point
-  docs/                 Specifications and design docs
-  tests/                67 pytest tests
-  scripts/              Utility scripts
+    sdk.py              # Unified facade — all agent actions go through here
+    session/            # AdsPower + Playwright CDP browser automation
+    bapi/               # HTTP client for Binance API (parsing, likes)
+    runtime/            # ActionGuard (limits), HumanBehavior (delays)
+    metrics/            # Collector, Scorer, Store — delayed outcome tracking
+    memory/             # Compactor — generates performance.md from data
+    strategy/           # Planner, Analyst, Reviewer, FeedFilter
+    content/            # Validators, market data, TA, news
+    activity/           # Engagement orchestration
+    accounts/           # Config loading, daily limits
+    db/                 # SQLite schema
+  agents/
+    aisama/             # Example agent with full memory structure
+  config/
+    personas.yaml       # Agent personality definitions
+    content_rules.yaml  # Writing style rules, banned phrases
+    settings.yaml       # Global settings
+  tests/                # 19 test files
+  session_run.py        # Example session entry point
 ```
 
-## Toolkit Functions
+## Recommended: AI Dev Framework
 
-### Parsing (httpx, no browser needed)
+If you want to modify this project structurally — add modules, redesign architecture, build new features — use [AI Dev Framework](https://github.com/one-aisama/ai-dev-framework). It provides a structured workflow for AI-assisted development: from idea to architecture to specs to implementation, with quality gates at each stage. This ensures changes are coherent, well-documented, and don't break what already works.
 
-| Function | Description |
-|----------|-------------|
-| `BapiClient.get_feed_recommend(page)` | Recommended feed posts |
-| `BapiClient.get_top_articles(page)` | Trending articles |
-| `BapiClient.get_fear_greed()` | Fear & greed index |
-| `BapiClient.get_hot_hashtags()` | Hot hashtags |
-| `TrendFetcher.fetch_all()` | All posts (feed + articles), deduplicated |
-| `rank_topics(posts)` | Top-N trending topics by engagement |
-| `get_market_data(symbols)` | Coin prices from Binance public API |
+## License
 
-### Actions via httpx
-
-| Function | Description |
-|----------|-------------|
-| `BapiClient.like_post(post_id)` | Like a post |
-
-### Actions via Playwright CDP (browser)
-
-| Function | Description |
-|----------|-------------|
-| `create_post(ws, text, coin, sentiment, image)` | Create post with chart + sentiment |
-| `comment_on_post(ws, post_id, text)` | Comment (handles Follow & Reply popup) |
-| `follow_author(ws, post_id)` | Follow (checks if already following) |
-| `repost(ws, post_id, comment)` | Quote/repost |
-| `browse_and_interact(ws, comment_gen, count)` | Browse feed + like/comment/follow |
-
-### Infrastructure
-
-| Function | Description |
-|----------|-------------|
-| `AdsPowerClient.start_browser(user_id)` | Start AdsPower browser profile |
-| `harvest_credentials(ws)` | Capture cookies + bapi headers |
-| `validate_credentials(cookies, headers)` | Check if credentials are alive |
-
-## Running Tests
-
-```bash
-python -m pytest tests/ -v --ignore=tests/test_harvester_integration.py
-```
-
-## Validation Scripts
-
-```bash
-python scripts/check_file_sizes.py    # Check no .py file > 500 lines
-python scripts/check_no_secrets.py    # Scan for hardcoded API keys
-```
-
-## Architecture Notes
-
-- **httpx** handles parsing, likes, and market data (fast, no browser needed)
-- **Playwright CDP** handles posting, commenting, following, reposting (requires client-side signatures or DOM input)
-- **Credentials** are harvested once via CDP, stored in SQLite, and used by httpx for authenticated requests
-- **AdsPower** provides anti-detect browser profiles with unique fingerprints and proxies per account
+MIT

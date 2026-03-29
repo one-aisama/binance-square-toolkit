@@ -1,61 +1,61 @@
-# Спецификация: scheduler
-# Модуль: src/scheduler/
-# Статус: опционален
+# Specification: scheduler
+# Module: src/scheduler/
+# Status: optional
 
-## Назначение
-Оркестрация пайплайнов по расписанию через APScheduler.
-**Опционален** — агент (Claude/Codex) может управлять таймингом напрямую, вызывая функции софта без scheduler.
+## Purpose
+Pipeline orchestration on a schedule via APScheduler.
+**Optional** — the agent (Claude/Codex) can manage timing directly by calling software functions without the scheduler.
 
-## Файлы
-| Файл | Что делает |
+## Files
+| File | What it does |
 |------|------------|
-| scheduler.py | `CycleScheduler` — APScheduler обёртка, запуск пайплайнов по аккаунтам |
+| scheduler.py | `CycleScheduler` — APScheduler wrapper, runs pipelines per account |
 
-## Класс CycleScheduler
+## Class CycleScheduler
 
-### Конструктор
+### Constructor
 ```python
 CycleScheduler(settings: dict, accounts: list[AccountConfig], db_path: str)
 ```
-Создаёт: `CredentialStore`, `ActionLimiter`, `AdsPowerClient`, `AsyncIOScheduler`.
+Creates: `CredentialStore`, `ActionLimiter`, `AdsPowerClient`, `AsyncIOScheduler`.
 
-### Методы
-| Метод | Что делает |
-|-------|------------|
-| `start()` | Запуск APScheduler, первый цикл через 5с если `first_run_immediate: true` |
-| `stop()` | Остановка |
-| `_run_cycle()` | Итерация по аккаунтам, вызов `_process_account()` |
-| `_process_account(account)` | Пайплайн: валидация creds → парсинг → генерация → публикация → активность |
+### Methods
+| Method | What it does |
+|--------|------------|
+| `start()` | Starts APScheduler, first cycle in 5s if `first_run_immediate: true` |
+| `stop()` | Stops scheduler |
+| `_run_cycle()` | Iterates through accounts, calls `_process_account()` |
+| `_process_account(account)` | Pipeline: validate creds → parse → generate → publish → activity |
 | `_refresh_credentials(account)` | AdsPower start → harvest → save → stop |
-| `_generate_content(account, topics, bapi_client)` | Выбор тем, market data, постановка в очередь |
+| `_generate_content(account, topics, bapi_client)` | Select topics, market data, queue content |
 | `_run_activity(account, posts, bapi_client)` | ActivityExecutor + run_cycle |
 
-## Пайплайн одного аккаунта
+## Single Account Pipeline
 ```
-1. Проверить credentials (valid + не протухли)
-   → если протухли: _refresh_credentials()
-2. Создать BapiClient с credentials
-3. TrendFetcher.fetch_all() → темы
-4. rank_topics() → отсортированные
-5. _generate_content() → очередь
-6. ContentPublisher.publish_pending() → публикация
-7. _run_activity() → лайки, комменты, репосты
+1. Check credentials (valid + not expired)
+   → if expired: _refresh_credentials()
+2. Create BapiClient with credentials
+3. TrendFetcher.fetch_all() → topics
+4. rank_topics() → sorted
+5. _generate_content() → queue
+6. ContentPublisher.publish_pending() → publish
+7. _run_activity() → likes, comments, reposts
 ```
 
-## Конфигурация
-Настройки из `config/settings.yaml`:
-- `cycle_interval_hours` — частота циклов
-- `first_run_immediate` — запустить первый цикл сразу
-- `adspower_base_url` — URL AdsPower API
+## Configuration
+Settings from `config/settings.yaml`:
+- `cycle_interval_hours` — cycle frequency
+- `first_run_immediate` — run first cycle immediately
+- `adspower_base_url` — AdsPower API URL
 
-## Зависимости
-Использует ВСЕ модули: session, bapi, parser, content, activity, accounts, db.
+## Dependencies
+Uses ALL modules: session, bapi, parser, content, activity, accounts, db.
 
-## Роль в системе
-Scheduler = конвейер для автономной работы. Не принимает творческих решений.
-Агент может заменить scheduler полностью, вызывая функции софта напрямую по заданию человека.
+## Role in the System
+Scheduler = pipeline for autonomous operation. Does not make creative decisions.
+The agent can completely replace the scheduler by calling software functions directly based on human instructions.
 
-## Известные проблемы
-- Activity loop вызывает bapi comment/repost (заглушки) — логирует warning
-- Publishing loop вызывает create_post (заглушка) — контент остаётся в очереди
-- Аккаунты обрабатываются последовательно, нет параллелизма
+## Known Issues
+- Activity loop calls bapi comment/repost (stubs) — logs warning
+- Publishing loop calls create_post (stub) — content stays in queue
+- Accounts are processed sequentially, no parallelism

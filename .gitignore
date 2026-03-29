@@ -1,9 +1,9 @@
 data/
 logs/
 .env
+.autonomous/
 __pycache__/
 *.pyc
 .pytest_cache/
-config/accounts/*.yaml
-!config/accounts/.gitkeep
-!config/accounts/_example.yaml
+_spike/
+.claude/settings.local.json

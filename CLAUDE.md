@@ -1,184 +1,159 @@
 # Binance Square Toolkit
-# Проект: личный | Статус: разработка | Обновлён: 2026-03-28
-# Стандарт: standards/ | Workflow: standards/03_workflow.md
 
-## Что это
-SDK для управления активностью на Binance Square через AdsPower профили.
-Софт = руки (выполняет действия). Агент = мозг (принимает решения, генерирует контент).
+## Overview
+SDK for managing activity on Binance Square through AdsPower browser profiles.
+Software = hands (executes actions). Agent = brain (makes decisions, generates content).
 
-## Стек
+## Tech Stack
 - Python 3.12
-- httpx (async HTTP — парсинг, лайки)
-- Playwright (CDP — посты, комменты, подписки, репосты)
+- httpx (async HTTP — parsing, likes)
+- Playwright (CDP — posts, comments, follows, reposts)
 - SQLite + aiosqlite (runtime data)
-- AdsPower Local API (управление браузерными профилями)
-- Pydantic v2 (валидация конфигов)
+- AdsPower Local API (browser profile management)
+- Pydantic v2 (config validation)
 
-## Архитектура: Hybrid (httpx + Playwright CDP)
-- **httpx** — парсинг, лайки, market data (быстро, без браузера)
-- **Playwright CDP** — посты, комменты, репосты, подписки (требуют client-side signature или DOM)
-- **Credentials** — захватываются через CDP один раз, используются httpx для парсинга/лайков
+## Architecture: Hybrid (httpx + Playwright CDP)
+- **httpx** — parsing, likes, market data (fast, no browser needed)
+- **Playwright CDP** — posts, comments, reposts, follows (require client-side signature or DOM)
+- **Credentials** — captured via CDP once, then reused by httpx for parsing/likes
 
-## Карта модулей
-| Модуль | Путь | Назначение | Статус |
-|--------|------|------------|--------|
-| **sdk** | **src/sdk.py** | **Единый фасад для агента — connect, get_feed, comment, post, like, follow** | **работает** |
-| session | src/session/ | AdsPower, CDP harvesting, browser-действия, credentials | работает |
-| bapi | src/bapi/ | httpx-клиент к Binance bapi, retry, rate limit | работает |
-| parser | src/parser/ | Парсинг фида, статей, ранжирование трендов | работает |
-| content | src/content/ | AI-генерация текстов (инструмент агента), очередь, market data | работает |
-| activity | src/activity/ | Лайки, комменты, репосты — оркестрация и таргетинг | работает |
-| **runtime** | **src/runtime/** | **ActionGuard (лимиты, circuit breaker), HumanBehavior (прогрев, паузы)** | **новый** |
-| **metrics** | **src/metrics/** | **MetricsStore, Collector, Scorer — сбор и агрегация метрик** | **новый** |
-| **memory** | **src/memory/** | **Compactor — генерация performance.md, relationships.md из данных** | **новый** |
-| **strategy** | **src/strategy/** | **Planner, Analyst, Reviewer, FeedFilter — стратегия агента** | **новый** |
-| **pipeline** | **src/pipeline.py** | **Один скрипт: collector → scorer → compactor → analyst** | **новый** |
-| accounts | src/accounts/ | YAML конфиги аккаунтов, лимиты, анти-детект | работает |
-| db | src/db/ | SQLite схема и инициализация (8 таблиц вкл. post_tracker) | работает |
-| scheduler | src/scheduler/ | Опциональная оркестрация (агент может заменить) | опционален |
-| main | src/main.py | Entry point, lifecycle | работает |
+## Module Map
+| Module | Path | Purpose | Status |
+|--------|------|---------|--------|
+| **sdk** | **src/sdk.py** | **Unified facade for agent — connect, get_feed, comment, post, like, follow** | **working** |
+| session | src/session/ | AdsPower, CDP harvesting, browser actions, credentials | working |
+| bapi | src/bapi/ | httpx client for Binance bapi, retry, rate limit | working |
+| parser | src/parser/ | Feed parsing, articles, trend ranking | working |
+| content | src/content/ | AI text generation (agent tool), queue, market data | working |
+| activity | src/activity/ | Likes, comments, reposts — orchestration and targeting | working |
+| **runtime** | **src/runtime/** | **ActionGuard (limits, circuit breaker), HumanBehavior (warm-up, delays)** | **working** |
+| **metrics** | **src/metrics/** | **MetricsStore, Collector, Scorer — metrics collection and aggregation** | **working** |
+| **memory** | **src/memory/** | **Compactor — generates performance.md, relationships.md from data** | **working** |
+| **strategy** | **src/strategy/** | **Planner, Analyst, Reviewer, FeedFilter — agent strategy layer** | **working** |
+| **pipeline** | **src/pipeline.py** | **Single script: collector -> scorer -> compactor -> analyst** | **working** |
+| accounts | src/accounts/ | YAML account configs, limits, anti-detect | working |
+| db | src/db/ | SQLite schema and initialization (8 tables incl. post_tracker) | working |
+| scheduler | src/scheduler/ | Optional orchestration (agent can replace) | optional |
+| main | src/main.py | Entry point, lifecycle | working |
 
-## Спецификации
+## Specifications
 - docs/specs/spec_session.md — Session (AdsPower, harvester, browser_actions)
 - docs/specs/spec_bapi.md — Bapi client (httpx gateway, credentials, retry)
 - docs/specs/spec_parser.md — Parser (feed, articles, trends, ranking)
 - docs/specs/spec_content.md — Content (AI generation, queue, market data)
 - docs/specs/spec_activity.md — Activity (likes, comments, reposts, targeting)
 - docs/specs/spec_accounts.md — Accounts (config, limits, anti-detect)
-- docs/design-spec.md — Общая архитектура
-- docs/PROJECT_IDEA.md — Идея проекта
-- docs/PROJECT_BRIEF.md — Бриф проекта
+- docs/design-spec.md — Overall architecture
+- docs/agent_api.md — API documentation for the agent (SDK methods, examples)
+- docs/PROJECT_IDEA.md — Project idea
+- docs/PROJECT_BRIEF.md — Project brief
 
-## Связи между модулями
-- session -> db (CredentialStore использует SQLite)
-- bapi -> session (BapiClient загружает credentials из CredentialStore)
-- parser -> bapi (TrendFetcher вызывает методы BapiClient)
-- content -> bapi, db (ContentPublisher использует очередь в SQLite)
-- activity -> bapi, accounts (ActivityExecutor использует BapiClient + ActionLimiter)
-- scheduler -> все модули (оркестрирует пайплайн)
+## Inter-Module Dependencies
+- session -> db (CredentialStore uses SQLite)
+- bapi -> session (BapiClient loads credentials from CredentialStore)
+- parser -> bapi (TrendFetcher calls BapiClient methods)
+- content -> bapi, db (ContentPublisher uses SQLite queue)
+- activity -> bapi, accounts (ActivityExecutor uses BapiClient + ActionLimiter)
+- scheduler -> all modules (orchestrates the pipeline)
 
-## Стандарт кода (императивы)
-- Файл: 200-300 строк, max 500. Больше — разбивай
-- Функция: 20-40 строк, max 100
-- Типизация на всех публичных функциях
-- Именование: глагол + объект (send_email, get_user). Без utils/helpers/misc
-- Один файл = одна ответственность. Если описание содержит "и" — разбивай
-- Все импорты в начале файла. Нет динамических импортов
-- Конфигурация только через .env + единая точка чтения
-- Секреты НИКОГДА в коде
+## Code Standards (Imperatives)
+- File: 200-300 lines, max 500. Larger — split it
+- Function: 20-40 lines, max 100
+- Type hints on all public functions
+- Naming: verb + object (send_email, get_user). No utils/helpers/misc
+- One file = one responsibility. If the description contains "and" — split it
+- All imports at the top of the file. No dynamic imports
+- Configuration only via .env + single read point
+- Secrets NEVER in code
 
-## Обработка ошибок
-- Формат: ГДЕ + ЧТО + КОНТЕКСТ
-- Пример: "BapiClient.like_post: 403 forbidden, post_id=12345"
-- Запрещено: пустые except, "something went wrong"
-- Структурированное логирование через logging, не print
+## Error Handling
+- Format: WHERE + WHAT + CONTEXT
+- Example: "BapiClient.like_post: 403 forbidden, post_id=12345"
+- Forbidden: bare except, "something went wrong"
+- Structured logging via logging, not print
 
-## Процесс работы
-- Одна задача за сессию. Ориентир: 3-5 файлов
-- Коммит после каждого логического изменения
-- ПЕРЕД изменением — тесты проходят. ПОСЛЕ — тесты проходят
-- Если файл > 400 строк — предупреди и предложи разбить
+## Workflow
+- One task per session. Target: 3-5 files
+- Commit after each logical change
+- BEFORE changes — tests pass. AFTER changes — tests pass
+- If file > 400 lines — warn and suggest splitting
 
-## Выбор технологий
-- ОБЯЗАТЕЛЬНО: 2-3 варианта с таблицей сравнения
-- ОБЯЗАТЕЛЬНО: рекомендация с обоснованием
-- ЗАПРЕЩЕНО: один вариант без альтернатив
+## Technology Choices
+- REQUIRED: 2-3 options with comparison table
+- REQUIRED: recommendation with justification
+- FORBIDDEN: single option without alternatives
 
-## Субагенты
-- .claude/agents/database-architect.md — схема БД, миграции
-- .claude/agents/backend-engineer.md — API, серверная логика
-- .claude/agents/frontend-developer.md — UI, компоненты
-- .claude/agents/qa-reviewer.md — ревью по чеклисту (Read-only)
-- .claude/agents/spec-reviewer.md — проверка полноты спецификации
-- .claude/agents/skeptic.md — верификация архитектурных решений
+## Sub-Agents
+- .claude/agents/database-architect.md — DB schema, migrations
+- .claude/agents/backend-engineer.md — API, server logic
+- .claude/agents/frontend-developer.md — UI, components
+- .claude/agents/qa-reviewer.md — Review by checklist (read-only)
+- .claude/agents/spec-reviewer.md — Spec completeness check
+- .claude/agents/skeptic.md — Architecture decision verification
 
 ## Quality Gate
-- После каждого субагента: scripts/quality_gate.py
-- GO = продолжаем. CONDITIONAL = продолжаем с замечаниями. NO-GO = СТОП
-- Финальный: scripts/quality_gate.py --tier=all
+- After each sub-agent: scripts/quality_gate.py
+- GO = continue. CONDITIONAL = continue with remarks. NO-GO = STOP
+- Final: scripts/quality_gate.py --tier=all
 
 ## Handoffs
-- Каждый субагент создаёт артефакт в docs/handoffs/[модуль]/
-- Следующий субагент ОБЯЗАН прочитать предыдущий handoff
-- Формат: docs/handoffs/[модуль]/[номер]_[что]_done.md
+- Each sub-agent creates an artifact in docs/handoffs/[module]/
+- The next sub-agent MUST read the previous handoff
+- Format: docs/handoffs/[module]/[number]_[what]_done.md
 
-## Маршрутизация по проблемам
-- "Браузер не запускается" -> src/session/adspower.py, config/accounts/*.yaml
-- "Credentials протухли" -> src/session/harvester.py, src/session/validator.py
-- "Селекторы сломались" -> src/session/page_map.py, src/session/browser_actions.py
-- "Пост не публикуется" -> src/session/browser_actions.py `create_post()`
-- "Лайк не работает" -> src/bapi/client.py `like_post()`
-- "Парсинг пустой" -> src/parser/fetcher.py, src/bapi/endpoints.py
-- "Лимиты не считаются" -> src/accounts/limiter.py
-- "AI генерация падает" -> src/content/generator.py, .env
-- "Агент скроллит без действий" -> agents/aisama/prompt.md, src/strategy/planner.py
-- "Guard блокирует действия" -> src/runtime/guard.py, config/accounts/*.yaml (лимиты)
-- "Метрики не собираются" -> src/pipeline.py, src/metrics/collector.py
-- "performance.md пустой" -> src/memory/compactor.py, src/metrics/scorer.py
+## Troubleshooting Routes
+- "Browser won't start" -> src/session/adspower.py, config/accounts/*.yaml
+- "Credentials expired" -> src/session/harvester.py, src/session/validator.py
+- "Selectors broken" -> src/session/page_map.py, src/session/browser_actions.py
+- "Post not publishing" -> src/session/browser_actions.py `create_post()`
+- "Like not working" -> src/bapi/client.py `like_post()`
+- "Parser returns empty" -> src/parser/fetcher.py, src/bapi/endpoints.py
+- "Limits not counting" -> src/accounts/limiter.py
+- "AI generation fails" -> src/content/generator.py, .env
+- "Agent scrolls without acting" -> agents/aisama/prompt.md, src/strategy/planner.py
+- "Guard blocks actions" -> src/runtime/guard.py, config/accounts/*.yaml (limits)
+- "Metrics not collecting" -> src/pipeline.py, src/metrics/collector.py
+- "performance.md is empty" -> src/memory/compactor.py, src/metrics/scorer.py
 
-## Точка входа
-- Запуск: `python src/main.py`
-- Pipeline (метрики): `python src/pipeline.py <agent_id> <agent_dir> [db_path]`
-- Тесты: `python -m pytest tests/ -v --ignore=tests/test_harvester_integration.py`
+## Entry Points
+- Run: `python src/main.py`
+- Pipeline (metrics): `python src/pipeline.py <agent_id> <agent_dir> [db_path]`
+- Tests: `python -m pytest tests/ -v --ignore=tests/test_harvester_integration.py`
 - Quality gate: `python scripts/quality_gate.py --tier=all`
 
-## При сомнениях
-- Спроси оператора, не угадывай
-- Лучше меньше но правильно, чем много но сломано
-- Если не знаешь — скажи "не знаю"
+## When in Doubt
+- Ask the operator, don't guess
+- Better less but correct than a lot but broken
+- If you don't know — say "I don't know"
 
-## Текущий статус
-- **SDK фасад: работает** (src/sdk.py — единая точка входа для агента)
-- **Все методы SDK протестированы live 2026-03-27:**
-  - connect/disconnect — подключение к AdsPower профилю
-  - get_feed_posts — сбор постов из рекомендованной ленты
-  - get_market_data — цены, объёмы, изменение 24h
-  - like_post — лайк через браузер
-  - comment_on_post — коммент с обработкой Follow popup
-  - create_post — текст + $CASHTAGS + chart + sentiment + картинка
-  - create_article — заголовок + body + обложка
-  - quote_repost — цитата поста с комментарием
-  - follow_user — подписка с проверкой уже подписан
-  - take_screenshot — скриншот любой страницы/элемента
-  - screenshot_chart — скриншот графика Binance (16:9, по селектору)
-  - download_image — скачивание картинки из интернета
-- ActionLimiter: **починен** (хардкод дефолтов, col overwrite, UTC/localtime)
-- **Новые Data методы:** get_trending_coins, get_crypto_news, get_article_content, get_ta_summary
-- **browse_and_interact() удалён** — агент сам решает, SDK только выполняет
-- **Content validator:** src/content/validator.py — валидация постов, комментов, статей, цитат (banned phrases из YAML, дубликаты, структура). Интегрирован в SDK create_post/create_article/quote_repost/comment_on_post
-- **Supervisor агент:** agents/supervisor/ — мониторинг, компактификация памяти, post tracker
-- **Post tracker:** таблица post_tracker в SQLite — трекинг всех постов всех агентов
+## Current Status
+- **SDK facade: working** (src/sdk.py — single entry point for the agent)
+- **All SDK methods tested and working:**
+  - connect/disconnect — connect to AdsPower profile
+  - get_feed_posts — collect posts from the recommended feed
+  - get_market_data — prices, volumes, 24h change
+  - like_post — like via browser
+  - comment_on_post — comment with Follow popup handling
+  - create_post — text + $CASHTAGS + chart + sentiment + image
+  - create_article — title + body + cover image
+  - quote_repost — quote post with comment
+  - follow_user — follow with already-followed check
+  - take_screenshot — screenshot any page/element
+  - screenshot_chart — Binance chart screenshot (16:9, by selector)
+  - download_image — download image from the internet
+- ActionLimiter: **fixed** (hardcoded defaults, col overwrite, UTC/localtime)
+- **Data methods:** get_trending_coins, get_crypto_news, get_article_content, get_ta_summary
+- **Content validator:** src/content/validator.py — validates posts, comments, articles, quotes (banned phrases from YAML, duplicates, structure). Integrated into SDK create_post/create_article/quote_repost/comment_on_post
+- **Supervisor agent:** agents/supervisor/ — monitoring, memory compaction, post tracker
+- **Post tracker:** post_tracker table in SQLite — tracks all posts across all agents
 
-## Спецификации
-- docs/specs/spec_session.md — Session (AdsPower, harvester, browser_actions)
-- docs/specs/spec_bapi.md — Bapi client (httpx gateway, credentials, retry)
-- docs/specs/spec_parser.md — Parser (feed, articles, trends, ranking)
-- docs/specs/spec_content.md — Content (AI generation, queue, market data)
-- docs/specs/spec_activity.md — Activity (likes, comments, reposts, targeting)
-- docs/specs/spec_accounts.md — Accounts (config, limits, anti-detect)
-- docs/design-spec.md — Общая архитектура
-- docs/agent_api.md — **API документация для агента (SDK методы, примеры)**
-- docs/PROJECT_IDEA.md — Идея проекта
-- docs/PROJECT_BRIEF.md — Бриф проекта
-
-## Архитектура агента v2 (2026-03-28)
-4-слойная система по иерархии надёжности:
-1. **Runtime (код):** guard.py (лимиты, circuit breaker по типам), behavior.py (человечность)
-2. **Metrics (код):** collector → scorer → insights. Pipeline.py запускается cron-ом
-3. **Memory (код):** compactor генерирует performance.md, relationships.md из insights
-4. **Strategy (LLM):** analyst (по триггеру) → planner (каждую сессию) → reviewer (после сессии)
-- Guard контролирует: дневные лимиты, cooldown, circuit breaker по типу действия, fallback-цепочки
-- Feed filter убирает спам и посты с 0 лайков ДО того как агент их видит
-- Planner генерирует JSON план с fallback для каждого действия
-- Scorer агрегирует метрики без весов (первые 30 сессий), автогенерирует lessons
-- Документ-основа: скваер_идея.md
-
-## Последние изменения
-- 2026-03-28 (v2): Agent System v2 — 4 новых модуля (runtime, metrics, memory, strategy), pipeline.py, переписан prompt.md, 159 тестов зелёные
-- 2026-03-28: Content validator (src/content/validator.py), интеграция в SDK, supervisor агент (agents/supervisor/), post_tracker таблица в SQLite, 145 тестов зелёные
-- 2026-03-27 (сессия 3): Удалён browse_and_interact() (агент сам решает), обновлён agent_api.md (все новые методы), техдолг закрыт, 106 тестов зелёные
-- 2026-03-27 (сессия 2): Фикс $CASHTAGS (re.split на # и $), фикс ActionLimiter (4 бага), фикс quote_repost (селектор detail-quote-button), переписан create_article (textarea title, article-editor-main Publish, нормализация \n), добавлены take_screenshot/screenshot_chart/download_image, 87 тестов зелёные, все методы SDK протестированы live
-- 2026-03-27: Создан src/sdk.py — единый фасад для агента. Добавлен collect_feed_posts(), починен парсинг текста (cookie-баннеры). Протестировано live: 5 комментов + 2 поста. docs/agent_api.md
-- 2026-03-26: Реструктуризация по стандарту, добавлены секции CLAUDE.md
-- 2026-03-25: CLAUDE.md приведены к шаблонам, переведены на русский
-- 2026-03-24: Обновлены CSS-селекторы в page_map.py
+## Agent Architecture v2
+4-layer system following a reliability hierarchy:
+1. **Runtime (code):** guard.py (limits, circuit breaker by action type), behavior.py (human-like behavior)
+2. **Metrics (code):** collector -> scorer -> insights. pipeline.py runs on cron
+3. **Memory (code):** compactor generates performance.md, relationships.md from insights
+4. **Strategy (LLM):** analyst (triggered) -> planner (each session) -> reviewer (after session)
+- Guard controls: daily limits, cooldown, circuit breaker per action type, fallback chains
+- Feed filter removes spam and 0-like posts BEFORE the agent sees them
+- Planner generates JSON plan with fallback for each action
+- Scorer aggregates metrics without weights (first 30 sessions), auto-generates lessons

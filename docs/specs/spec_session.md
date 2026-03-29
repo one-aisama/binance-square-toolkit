@@ -1,30 +1,30 @@
-# Спецификация: Модуль Session
+# Specification: Session Module
 
-**Путь:** `src/session/`
-**Файлы:** `adspower.py`, `harvester.py`, `credential_store.py`, `validator.py`, `browser_actions.py`, `page_map.py`
-
----
-
-## Описание
-
-Модуль Session управляет всей браузерной инфраструктурой: запуск и остановка AdsPower-профилей через локальный API, захват credentials сессии Binance (cookies + headers) через Playwright CDP, хранение credentials в SQLite, валидация их живости, и выполнение браузерных действий (публикация, комментирование, репост, подписка), которые невозможно выполнить через обычный HTTP, потому что Binance требует клиентскую подпись (nonce + signature) и DOM-ввод для создания контента.
+**Path:** `src/session/`
+**Files:** `adspower.py`, `harvester.py`, `credential_store.py`, `validator.py`, `browser_actions.py`, `page_map.py`
 
 ---
 
-## Пользовательские сценарии
+## Description
 
-- Как агент, я хочу запустить AdsPower-профиль для конкретного аккаунта, чтобы получить WebSocket-эндпоинт для подключения Playwright.
-- Как агент, я хочу захватить cookies и bapi-заголовки из живой браузерной сессии, чтобы BapiClient мог делать аутентифицированные httpx-запросы без браузера.
-- Как агент, я хочу сохранять и загружать захваченные credentials между перезапусками, чтобы не перезахватывать их каждый раз.
-- Как агент, я хочу проверить, живы ли сохранённые credentials, прежде чем делать bapi-вызовы, чтобы обнаружить истечение и перезахватить проактивно.
-- Как агент, я хочу создать пост, комментарий, подписку или репост через браузерную автоматизацию, чтобы выполнять действия, требующие клиентского nonce/signature от Binance.
-- Как агент, я хочу обходить рекомендованную ленту и взаимодействовать с постами (лайк + комментарий + подписка) в одной браузерной сессии, чтобы эффективно проводить полный цикл активности.
+The Session module manages all browser infrastructure: starting and stopping AdsPower profiles via the local API, capturing Binance session credentials (cookies + headers) via Playwright CDP, storing credentials in SQLite, validating their liveness, and executing browser actions (posting, commenting, reposting, following) that cannot be performed via regular HTTP because Binance requires a client-side signature (nonce + signature) and DOM input for content creation.
 
 ---
 
-## Модель данных
+## User Stories
 
-Credentials хранятся в SQLite (определены в `src/db/models.py`):
+- As an agent, I want to start an AdsPower profile for a specific account, so I get a WebSocket endpoint for Playwright connection.
+- As an agent, I want to capture cookies and bapi headers from a live browser session, so BapiClient can make authenticated httpx requests without a browser.
+- As an agent, I want to save and load captured credentials between restarts, so I don't have to recapture them every time.
+- As an agent, I want to check whether saved credentials are still live before making bapi calls, so I can detect expiration and recapture proactively.
+- As an agent, I want to create a post, comment, follow, or repost via browser automation, so I can perform actions that require Binance's client-side nonce/signature.
+- As an agent, I want to browse the recommended feed and interact with posts (like + comment + follow) in a single browser session, so I can efficiently run a full activity cycle.
+
+---
+
+## Data Model
+
+Credentials are stored in SQLite (defined in `src/db/models.py`):
 
 ```sql
 CREATE TABLE IF NOT EXISTS credentials (
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS credentials (
 );
 ```
 
-Дополнительных таблиц нет. `CredentialStore` — единственный читатель/писатель этой таблицы.
+No additional tables. `CredentialStore` is the sole reader/writer of this table.
 
 ---
 
@@ -45,14 +45,14 @@ CREATE TABLE IF NOT EXISTS credentials (
 
 ### AdsPowerClient (`src/session/adspower.py`)
 
-| Метод | Сигнатура | Возвращает | Примечания |
-|-------|-----------|------------|------------|
-| `__init__` | `(base_url="http://local.adspower.net:50325", timeout_start=60.0, timeout_stop=30.0, timeout_status=20.0, retry_attempts=2, retry_backoff=0.5)` | — | Все таймауты в секундах |
-| `get_status` | `() -> dict` | Payload статуса AdsPower | Бросает `AdsPowerError` если недоступен |
-| `start_browser` | `(user_id: str) -> dict` | `{"ws": str, "debug_port": str, "webdriver": str}` | `ws` — CDP-эндпоинт для Playwright |
-| `stop_browser` | `(user_id: str) -> dict` | Ответ остановки AdsPower | |
+| Method | Signature | Returns | Notes |
+|--------|-----------|---------|-------|
+| `__init__` | `(base_url="http://local.adspower.net:50325", timeout_start=60.0, timeout_stop=30.0, timeout_status=20.0, retry_attempts=2, retry_backoff=0.5)` | — | All timeouts in seconds |
+| `get_status` | `() -> dict` | AdsPower status payload | Raises `AdsPowerError` if unavailable |
+| `start_browser` | `(user_id: str) -> dict` | `{"ws": str, "debug_port": str, "webdriver": str}` | `ws` is the CDP endpoint for Playwright |
+| `stop_browser` | `(user_id: str) -> dict` | AdsPower stop response | |
 
-**Ошибки:** `AdsPowerError` — бросается при HTTP-ошибке, ненулевом `code` в ответе или исчерпании retry. Retry использует экспоненциальный backoff: `retry_backoff * 2^(attempt-1)`.
+**Errors:** `AdsPowerError` — raised on HTTP error, non-zero `code` in response, or exhausted retries. Retry uses exponential backoff: `retry_backoff * 2^(attempt-1)`.
 
 ---
 
@@ -62,33 +62,33 @@ CREATE TABLE IF NOT EXISTS credentials (
 async def harvest_credentials(ws_endpoint: str) -> dict[str, Any]
 ```
 
-Подключается через CDP к браузеру по `ws_endpoint`, переходит на `https://www.binance.com/en/square`, перехватывает все сетевые ответы `/bapi/`, извлекает следующие заголовки: `csrftoken`, `bnc-uuid`, `device-info`, `clienttype`, `lang`, `bnc-location`, `bnc-time-zone`, `fvideo-id`, `fvideo-token`, `versioncode`, `x-passthrough-token`, `x-trace-id`, `x-ui-request-trace`, плюс `user-agent` из `navigator.userAgent`.
+Connects via CDP to the browser at `ws_endpoint`, navigates to `https://www.binance.com/en/square`, intercepts all `/bapi/` network responses, extracts the following headers: `csrftoken`, `bnc-uuid`, `device-info`, `clienttype`, `lang`, `bnc-location`, `bnc-time-zone`, `fvideo-id`, `fvideo-token`, `versioncode`, `x-passthrough-token`, `x-trace-id`, `x-ui-request-trace`, plus `user-agent` from `navigator.userAgent`.
 
-**Возвращает:**
+**Returns:**
 ```python
 {
-    "cookies": dict[str, str],           # только cookies binance.com
-    "headers": dict[str, str],           # все захваченные bapi-заголовки
+    "cookies": dict[str, str],           # binance.com cookies only
+    "headers": dict[str, str],           # all captured bapi headers
     "discovered_endpoints": list[dict],  # [{"method": str, "path": str}]
 }
 ```
 
-**Бросает:** `RuntimeError` при ошибке CDP-подключения. Ошибки навигации логируются как warning и не прерывают работу — возвращаются частичные данные.
+**Raises:** `RuntimeError` on CDP connection failure. Navigation errors are logged as warnings and don't abort — partial data is returned.
 
-**Важно:** НЕ закрывает браузер. Жизненным циклом браузера управляет AdsPower.
+**Important:** Does NOT close the browser. Browser lifecycle is managed by AdsPower.
 
 ---
 
 ### CredentialStore (`src/session/credential_store.py`)
 
-| Метод | Сигнатура | Возвращает |
-|-------|-----------|------------|
+| Method | Signature | Returns |
+|--------|-----------|---------|
 | `__init__` | `(db_path: str)` | — |
-| `save` | `(account_id: str, cookies: dict, headers: dict, max_age_hours: float = 12.0) -> None` | Upsert — перезаписывает существующую строку |
-| `load` | `(account_id: str) -> dict \| None` | `{account_id, cookies, headers, harvested_at, expires_at, valid}` или `None` |
-| `invalidate` | `(account_id: str) -> None` | Устанавливает `valid = FALSE` |
-| `is_valid` | `(account_id: str) -> bool` | `True` если строка существует и `valid == TRUE` |
-| `is_expired` | `(account_id: str) -> bool` | `True` если `expires_at < utcnow()` или строка отсутствует |
+| `save` | `(account_id: str, cookies: dict, headers: dict, max_age_hours: float = 12.0) -> None` | Upsert — overwrites existing row |
+| `load` | `(account_id: str) -> dict \| None` | `{account_id, cookies, headers, harvested_at, expires_at, valid}` or `None` |
+| `invalidate` | `(account_id: str) -> None` | Sets `valid = FALSE` |
+| `is_valid` | `(account_id: str) -> bool` | `True` if row exists and `valid == TRUE` |
+| `is_expired` | `(account_id: str) -> bool` | `True` if `expires_at < utcnow()` or row doesn't exist |
 
 ---
 
@@ -98,16 +98,16 @@ async def harvest_credentials(ws_endpoint: str) -> dict[str, Any]
 async def validate_credentials(cookies: dict[str, str], headers: dict[str, str]) -> bool
 ```
 
-Делает POST на `https://www.binance.com/bapi/composite/v1/friendly/pgc/card/fearGreedHighestSearched` с предоставленными cookies и подмножеством заголовков (`csrftoken`, `bnc-uuid`, `device-info`, `user-agent`, `bnc-location`). Возвращает `True` если ответ HTTP 200 и `data.success == True` или `data.code == "000000"`. Возвращает `False` при любой ошибке или не-auth ответе.
+Makes a POST to `https://www.binance.com/bapi/composite/v1/friendly/pgc/card/fearGreedHighestSearched` with the provided cookies and a subset of headers (`csrftoken`, `bnc-uuid`, `device-info`, `user-agent`, `bnc-location`). Returns `True` if the response is HTTP 200 and `data.success == True` or `data.code == "000000"`. Returns `False` on any error or non-auth response.
 
 ---
 
 ### browser_actions (`src/session/browser_actions.py`)
 
-Все функции подключаются к браузеру через `_get_page(ws_endpoint)`, который возвращает `(playwright, browser, page)` используя `context.pages[0]`. Все функции вызывают `await pw.stop()` в `finally`.
+All functions connect to the browser via `_get_page(ws_endpoint)`, which returns `(playwright, browser, page)` using `context.pages[0]`. All functions call `await pw.stop()` in `finally`.
 
-| Функция | Сигнатура | Возвращает |
-|---------|-----------|------------|
+| Function | Signature | Returns |
+|----------|-----------|---------|
 | `create_post` | `(ws_endpoint, text, coin=None, sentiment=None, image_path=None) -> dict` | `{"success": bool, "post_id": str, ...}` |
 | `create_article` | `(ws_endpoint, title, body, cover_path=None, image_paths=None) -> dict` | `{"success": bool, "post_id": str, ...}` |
 | `repost` | `(ws_endpoint, post_id, comment="") -> dict` | `{"success": bool, "original_post_id": str}` |
@@ -115,73 +115,73 @@ async def validate_credentials(cookies: dict[str, str], headers: dict[str, str])
 | `follow_author` | `(ws_endpoint, post_id) -> dict` | `{"success": bool, "post_id": str, "action": str}` |
 | `browse_and_interact` | `(ws_endpoint, comment_generator=None, count=5, skip_rate=0.3) -> dict` | `{"success": bool, "interacted": int, "skipped": int, "actions": list}` |
 
-Значения `coin` для `create_post`: строка тикера вроде `"BTC"`, `"ETH"`. `sentiment`: `"bullish"` или `"bearish"`.
+`coin` values for `create_post`: ticker string like `"BTC"`, `"ETH"`. `sentiment`: `"bullish"` or `"bearish"`.
 
-Значения `action` в `follow_author`: `"followed"`, `"already_following"`, `"skipped"`.
+`action` values in `follow_author`: `"followed"`, `"already_following"`, `"skipped"`.
 
 ---
 
 ### page_map (`src/session/page_map.py`)
 
-Только константы — функций нет. CSS-селекторы и шаблоны URL, используемые `browser_actions`. Ключевые селекторы:
+Constants only — no functions. CSS selectors and URL templates used by `browser_actions`. Key selectors:
 
-| Константа | Значение | Используется для |
-|-----------|----------|-----------------|
-| `SQUARE_URL` | `"https://www.binance.com/en/square"` | Навигация |
-| `POST_URL_TEMPLATE` | `"https://www.binance.com/en/square/post/{post_id}"` | Навигация |
-| `COMPOSE_EDITOR` | `"div.ProseMirror[contenteditable='true']"` | Ввод текста |
-| `COMPOSE_INLINE_POST_BUTTON` | `"button[data-bn-type='button']:not(.news-post-button):has-text('Post')"` | Публикация |
-| `POST_REPLY_INPUT` | `'input[placeholder="Post your reply"]'` | Ввод комментария |
-| `POST_FOLLOW_REPLY_POPUP` | `"button:has-text('Follow & Reply')"` | Popup ограниченного комментирования |
-| `FOLLOW_BUTTON` | `"button:has-text('Follow')"` | Подписка |
+| Constant | Value | Used For |
+|----------|-------|----------|
+| `SQUARE_URL` | `"https://www.binance.com/en/square"` | Navigation |
+| `POST_URL_TEMPLATE` | `"https://www.binance.com/en/square/post/{post_id}"` | Navigation |
+| `COMPOSE_EDITOR` | `"div.ProseMirror[contenteditable='true']"` | Text input |
+| `COMPOSE_INLINE_POST_BUTTON` | `"button[data-bn-type='button']:not(.news-post-button):has-text('Post')"` | Publishing |
+| `POST_REPLY_INPUT` | `'input[placeholder="Post your reply"]'` | Comment input |
+| `POST_FOLLOW_REPLY_POPUP` | `"button:has-text('Follow & Reply')"` | Restricted commenting popup |
+| `FOLLOW_BUTTON` | `"button:has-text('Follow')"` | Following |
 
 ---
 
-## Бизнес-логика
+## Business Logic
 
-### Жизненный цикл credentials
+### Credential Lifecycle
 ```
-[отсутствуют] → harvest_credentials() → save() → [валидны, не истекли]
-[валидны, не истекли] → is_expired() == True → harvest_credentials() → save() → [валидны, обновлены]
-[валидны] → bapi возвращает 401/403 → invalidate() → [невалидны]
-[невалидны] → harvest_credentials() → save() → [валидны]
+[absent] → harvest_credentials() → save() → [valid, not expired]
+[valid, not expired] → is_expired() == True → harvest_credentials() → save() → [valid, refreshed]
+[valid] → bapi returns 401/403 → invalidate() → [invalid]
+[invalid] → harvest_credentials() → save() → [valid]
 ```
 
-### Обработка автодополнения хэштегов
-При вводе текста поста, содержащего `#hashtag`, popup автодополнения Binance блокирует кнопку Post. `_type_with_hashtag_handling()` разделяет текст по `#`, вводит каждое слово хэштега, затем нажимает `Escape` для закрытия popup-а перед продолжением.
+### Hashtag Autocomplete Handling
+When typing post text containing `#hashtag`, the Binance autocomplete popup blocks the Post button. `_type_with_hashtag_handling()` splits text by `#`, types each hashtag word, then presses `Escape` to close the popup before continuing.
 
-### Правило безопасности подписки
-`follow_author` читает `text_content()` кнопки. Если текст `"Following"` или `"Unfollow"`, клик **не** выполняется (клик привёл бы к отписке). Кликает только если текст ровно `"Follow"`.
+### Follow Safety Rule
+`follow_author` reads the button's `text_content()`. If the text is `"Following"` or `"Unfollow"`, the click is **not** performed (clicking would unfollow). Only clicks if the text is exactly `"Follow"`.
 
-### Различение кнопок Post
-На странице Square существуют две кнопки Post: `.news-post-button` (левая панель, открывает модальное окно) и inline кнопка публикации. Всегда используется inline кнопка: `button[data-bn-type='button']:not(.news-post-button):has-text('Post')`.
+### Post Button Disambiguation
+The Square page has two Post buttons: `.news-post-button` (left panel, opens a modal) and an inline publish button. The inline button is always used: `button[data-bn-type='button']:not(.news-post-button):has-text('Post')`.
 
-### Фильтрация спама в browse_and_interact
-Посты пропускаются если: длина текста < 50 символов, лайков < 3, или текст содержит любое из `{"gift", "giveaway", "airdrop", "copy trading"}`. Человекоподобная задержка между постами: `random.uniform(15, 35) + (interacted_count * 2)` секунд.
+### Spam Filtering in browse_and_interact
+Posts are skipped if: text length < 50 characters, likes < 3, or text contains any of `{"gift", "giveaway", "airdrop", "copy trading"}`. Human-like delay between posts: `random.uniform(15, 35) + (interacted_count * 2)` seconds.
 
-### Заголовки валидации
-`fvideo-id` и `fvideo-token` обязательны для того, чтобы bapi возвращал ненулевые `data`. Без них bapi возвращает `data: null` даже при HTTP 200.
-
----
-
-## Крайние случаи
-
-| Ситуация | Ожидаемое поведение |
-|----------|---------------------|
-| AdsPower не запущен | `AdsPowerError` бросается после `retry_attempts` с экспоненциальным backoff |
-| CDP-подключение не удалось | `RuntimeError` из `harvest_credentials` |
-| Навигация на Square по таймауту | Warning в лог, возвращаются частичные credentials (что было перехвачено до таймаута) |
-| Не перехвачено ни одного bapi-запроса | Возвращается dict `cookies` из хранилища браузера; `headers` могут быть пустыми или частичными |
-| Credentials истекли (is_expired=True) | Вызывающий код должен перезахватить; `CredentialStore` не обновляет автоматически |
-| Popup "Follow & Reply" появляется при комментировании | Popup кликается — это одновременно подписывает на автора И отправляет оригинальный комментарий. Второй комментарий не пишется. |
-| Кнопка Post не найдена в течение 5 секунд | `TimeoutError` пробрасывается, `create_post` возвращает `{"success": False, "error": str}` |
-| `browse_and_interact` при пустой ленте | Возвращает `{"success": True, "interacted": 0, "skipped": 0, "actions": []}` |
-| `create_article` — не тестировано live | Может молча упасть; кнопка публикации статьи должна быть прокручена в видимую область перед кликом |
+### Validation Headers
+`fvideo-id` and `fvideo-token` are required for bapi to return non-null `data`. Without them, bapi returns `data: null` even with HTTP 200.
 
 ---
 
-## Приоритет и зависимости
+## Edge Cases
 
-- **Приоритет:** Высокий (фундаментальный — все остальные модули зависят от него)
-- **Зависит от:** `src/db/` (SQLite-схема должна быть инициализирована до того, как `CredentialStore` сможет писать)
-- **Блокирует:** `src/bapi/` (BapiClient нуждается в `CredentialStore`), `src/content/publisher.py` (нуждается в `browser_actions`), `src/activity/executor.py` (нуждается в `browser_actions` для комментариев/репостов)
+| Situation | Expected Behavior |
+|-----------|-------------------|
+| AdsPower not running | `AdsPowerError` raised after `retry_attempts` with exponential backoff |
+| CDP connection failed | `RuntimeError` from `harvest_credentials` |
+| Navigation to Square times out | Warning logged, partial credentials returned (whatever was intercepted before timeout) |
+| No bapi requests intercepted | Browser storage `cookies` dict is returned; `headers` may be empty or partial |
+| Credentials expired (is_expired=True) | Caller must recapture; `CredentialStore` does not auto-refresh |
+| "Follow & Reply" popup appears during commenting | Popup is clicked — this simultaneously follows the author AND submits the original comment. A second comment is not written. |
+| Post button not found within 5 seconds | `TimeoutError` propagated, `create_post` returns `{"success": False, "error": str}` |
+| `browse_and_interact` with empty feed | Returns `{"success": True, "interacted": 0, "skipped": 0, "actions": []}` |
+| `create_article` — not tested live | May silently fail; the article publish button needs to be scrolled into view before clicking |
+
+---
+
+## Priority and Dependencies
+
+- **Priority:** High (foundational — all other modules depend on it)
+- **Depends on:** `src/db/` (SQLite schema must be initialized before `CredentialStore` can write)
+- **Blocks:** `src/bapi/` (BapiClient needs `CredentialStore`), `src/content/publisher.py` (needs `browser_actions`), `src/activity/executor.py` (needs `browser_actions` for comments/reposts)

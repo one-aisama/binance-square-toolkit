@@ -86,5 +86,6 @@ POST_FOLLOW_REPLY_POPUP = "button:has-text('Follow & Reply')"
 FOLLOW_BUTTON = "button:has-text('Follow')"
 
 # Feed tabs
-FEED_RECOMMENDED_TAB = "text=Recommended"
-FEED_FOLLOWING_TAB = "text=Following"
+FEED_RECOMMENDED_TAB = ".tab-item:has-text('Recommended')"
+FEED_FOLLOWING_TAB = ".tab-item:has-text('Following')"
+

@@ -5,9 +5,14 @@ SDK for AI agent to manage a Binance Square profile. Agent decides, SDK executes
 ## Quick Start
 
 ```python
+from src.runtime.agent_config import load_active_agent
 from src.sdk import BinanceSquareSDK
 
-sdk = BinanceSquareSDK(profile_serial="1")
+agent = load_active_agent()
+sdk = BinanceSquareSDK(
+    profile_serial=agent.profile_serial,
+    account_id=agent.agent_id,
+)
 await sdk.connect()
 
 # Read feed
@@ -54,7 +59,7 @@ Collect posts from Binance Square feed for agent to review.
 **Returns:** `list[dict]` — each dict:
 ```python
 {
-    "post_id": "305668937425010",
+    "post_id": "123456789012345",
     "author": "CryptoAnalyst",
     "text": "Full post text without cookie banners...",
     "like_count": 244
@@ -104,7 +109,7 @@ Fetch engagement stats for a specific post.
 
 **Returns:** `dict`
 ```python
-{"post_id": "306032...", "likes": "1", "comments": "0", "quotes": "0",
+{"post_id": "123456789012346...", "likes": "1", "comments": "0", "quotes": "0",
  "title_preview": "me watching my portfolio..."}
 ```
 
@@ -224,7 +229,7 @@ Create a new post on Binance Square.
 
 **Returns:** `dict`
 ```python
-{"success": True, "post_id": "305847920721665", "response": {...}}
+{"success": True, "post_id": "123456789012347", "response": {...}}
 ```
 
 **Notes:**

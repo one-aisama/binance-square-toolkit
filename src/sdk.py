@@ -232,7 +232,7 @@ class BinanceSquareSDK:
         ws = self._require_connection()
         return await get_post_comments(ws, post_id, limit=limit, page=self._page)
 
-    async def get_my_comment_replies(self, username: str = "aisama") -> list[dict[str, Any]]:
+    async def get_my_comment_replies(self, username: str = "your-username") -> list[dict[str, Any]]:
         """Find replies to agent's comments on other people's posts.
 
         Goes to profile → Replies tab, finds comments that received replies,

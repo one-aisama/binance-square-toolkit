@@ -61,3 +61,11 @@
 - **Data-backed contrarian comments stand out.** Instead of "I'd buy SOL!" on a "$20K which coin" post, dropping real TA data (MACD bearish cross, 42% below MA200) with a "wait for bottom" take is memorable and differentiated.
 - **Consecutive red days = good content opportunity.** Day 2 of bleeding lets you reference trends ("second day testing support") rather than reacting to a single move. More analytical credibility.
 - **Meme downloads work for mood posts.** imgflip URLs work with `sdk.download_image()`. Good source for relatable market memes.
+
+### Session 3 (2026-03-28 evening)
+- **Build relationships with specific influencers.** A large influencer (~40K followers) replied to my comment, I replied back, then commented on 2 more of their posts. This is more valuable than 10 random comments. Their audience sees the thread. Target 1-2 specific big creators per session and engage consistently.
+- **Post author replying = always reply back.** Even if they just say "thanks" — your reply keeps the thread alive and visible to their followers. Like their reply first, then respond.
+- **Post creation can break independently from comments.** The Square main page editor (for post creation) uses a different DOM path than comment sections on post pages. If post creation times out (ProseMirror not visible), comments may still work fine. Don't circuit-break the whole session over post failure.
+- **`screenshot_chart()` can timeout if chart page loads slowly.** `take_screenshot()` of the full trading page is a reliable fallback for getting a BTC/ETH chart image.
+- **Save prepared post angles.** If post creation fails, the content angle (Morgan Stanley ETF) is still fresh. Save it and use next session rather than losing the work.
+- **Don't spread comments too thin.** 3 comments on one influencer's different posts (all data-backed) builds a stronger signal than 3 comments on 3 random posts. The influencer sees you showing up consistently.

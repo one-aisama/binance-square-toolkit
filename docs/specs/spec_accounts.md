@@ -1,28 +1,28 @@
-# Спецификация: Модуль Accounts
+# Specification: Accounts Module
 
-**Путь:** `src/accounts/`
-**Файлы:** `manager.py`, `limiter.py`, `anti_detect.py`
-
----
-
-## Описание
-
-Модуль Accounts предоставляет инструменты для загрузки конфигураций аккаунтов/персон из YAML, контроля дневных лимитов действий и предотвращения перекрёстных взаимодействий между аккаунтами. Агент использует этот модуль чтобы знать какие аккаунты существуют, какие у них персоны и лимиты, и проверять разрешено ли действие перед выполнением.
+**Path:** `src/accounts/`
+**Files:** `manager.py`, `limiter.py`, `anti_detect.py`
 
 ---
 
-## Пользовательские сценарии
+## Description
 
-- Как агент, я хочу загрузить все конфиги аккаунтов с объединёнными данными персон, чтобы знать стиль, темы и лимиты каждого аккаунта.
-- Как агент, я хочу проверить разрешено ли конкретное действие для аккаунта сегодня, чтобы не превышать безопасные дневные пороги.
-- Как агент, я хочу чтобы каждое действие (успех или ошибка) записывалось в БД, чтобы можно было отслеживать активность и дебажить.
-- Как агент, я хочу проверять что целевой пост не написан одним из моих аккаунтов, чтобы никогда не создавать само-взаимодействия.
+The Accounts module provides tools for loading account/persona configurations from YAML, controlling daily action limits, and preventing cross-account interactions. The agent uses this module to know which accounts exist, what personas and limits they have, and to check whether an action is allowed before executing it.
 
 ---
 
-## Модель данных
+## User Stories
 
-### Pydantic модели конфигов (`src/accounts/manager.py`)
+- As an agent, I want to load all account configs with merged persona data, so I know the style, topics, and limits of each account.
+- As an agent, I want to check whether a specific action is allowed for an account today, so I don't exceed safe daily thresholds.
+- As an agent, I want every action (success or failure) to be recorded in the DB, so I can track activity and debug.
+- As an agent, I want to verify that the target post is not written by one of my accounts, so I never create self-interactions.
+
+---
+
+## Data Model
+
+### Pydantic Config Models (`src/accounts/manager.py`)
 
 ```python
 class ProxyConfig(BaseModel):
@@ -49,10 +49,10 @@ class AccountConfig(BaseModel):
     adspower_profile_id: str
     proxy: ProxyConfig | None = None
     limits: LimitsConfig = LimitsConfig()
-    persona: PersonaConfig | None = None  # Заполняется после merge
+    persona: PersonaConfig | None = None  # Populated after merge
 ```
 
-### Таблицы БД (читает/пишет ActionLimiter)
+### DB Tables (read/written by ActionLimiter)
 
 ```sql
 CREATE TABLE IF NOT EXISTS actions_log (
@@ -89,7 +89,7 @@ def load_personas(personas_path: str) -> dict[str, PersonaConfig]
 def load_accounts(accounts_dir: str, personas_path: str) -> list[AccountConfig]
 ```
 
-`load_accounts` читает все `*.yaml` файлы из `accounts_dir` (пропуская файлы начинающиеся с `_` или `.`), парсит каждый в `AccountConfig` и объединяет с соответствующей персоной из `personas_path`. Возвращает список полностью сконфигурированных аккаунтов.
+`load_accounts` reads all `*.yaml` files from `accounts_dir` (skipping files starting with `_` or `.`), parses each into `AccountConfig`, and merges with the corresponding persona from `personas_path`. Returns a list of fully configured accounts.
 
 ---
 
@@ -100,13 +100,13 @@ class ActionLimiter:
     def __init__(self, db_path: str)
 ```
 
-| Метод | Сигнатура | Возвращает |
-|-------|-----------|------------|
-| `check_allowed` | `(account_id: str, action_type: str, daily_limit: list[int]) -> bool` | True если сегодняшний счёт < детерминированного дневного лимита |
-| `record_action` | `(account_id: str, action_type: str, target_id: str \| None, status: str, error: str \| None) -> None` | Пишет в actions_log + upsert в daily_stats |
-| `get_today_count` | `(account_id: str, action_type: str) -> int` | Количество успешных действий за сегодня |
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `check_allowed` | `(account_id: str, action_type: str, daily_limit: list[int]) -> bool` | True if today's count < deterministic daily limit |
+| `record_action` | `(account_id: str, action_type: str, target_id: str \| None, status: str, error: str \| None) -> None` | Writes to actions_log + upserts daily_stats |
+| `get_today_count` | `(account_id: str, action_type: str) -> int` | Count of successful actions for today |
 
-**Детерминированный дневной лимит:** для каждой тройки `(account_id, date, action_type)` seed-хеш определяет точный лимит в диапазоне `[min, max]`. Один аккаунт получает одинаковый лимит весь день, но разные лимиты в разные дни. Предотвращает предсказуемые паттерны.
+**Deterministic daily limit:** for each triple `(account_id, date, action_type)` a seed hash determines the exact limit within the range `[min, max]`. One account gets the same limit all day, but different limits on different days. Prevents predictable patterns.
 
 ---
 
@@ -117,52 +117,52 @@ def are_own_accounts(account_id_1: str, account_id_2: str, all_account_ids: set[
 def should_skip_post_by_author(post_author_id: str, own_account_ids: set[str]) -> bool
 ```
 
-Простые проверки принадлежности к множеству. `should_skip_post_by_author` возвращает `True` если автор поста — один из наших аккаунтов.
+Simple set membership checks. `should_skip_post_by_author` returns `True` if the post author is one of our accounts.
 
 ---
 
-## Бизнес-логика
+## Business Logic
 
-### Конвейер загрузки конфигов
+### Config Loading Pipeline
 ```
 config/personas.yaml  ->  load_personas()  ->  dict[str, PersonaConfig]
 config/accounts/*.yaml  ->  load_accounts()  ->  list[AccountConfig]
-                                                    (каждый с объединённой персоной)
+                                                    (each with merged persona)
 ```
 
-Файлы начинающиеся с `_` (например `_example.yaml`) пропускаются. Если persona_id из конфига аккаунта не существует в personas.yaml — логируется предупреждение, но аккаунт загружается (с `persona = None`).
+Files starting with `_` (e.g. `_example.yaml`) are skipped. If a persona_id from the account config doesn't exist in personas.yaml — a warning is logged, but the account is loaded (with `persona = None`).
 
-### Контроль дневных лимитов
+### Daily Limit Control
 ```
-Агент хочет лайкнуть пост для аккаунта X
-  -> вызывает limiter.check_allowed("X", "like", [30, 60])
-  -> limiter считает сегодняшние успешные лайки для X
-  -> limiter вычисляет детерминированный лимит на сегодня (напр. 47)
-  -> возвращает True если count < 47, False иначе
-  -> после успешного лайка: limiter.record_action("X", "like", target_id="post123")
+Agent wants to like a post for account X
+  -> calls limiter.check_allowed("X", "like", [30, 60])
+  -> limiter counts today's successful likes for X
+  -> limiter computes deterministic limit for today (e.g. 47)
+  -> returns True if count < 47, False otherwise
+  -> after successful like: limiter.record_action("X", "like", target_id="post123")
 ```
 
-### Upsert дневной статистики
-`record_action` пишет в обе таблицы: `actions_log` (отдельная строка) и `daily_stats` (upsert инкремент). Обновляемая колонка зависит от `action_type` (маппится в `{type}s_count`), а `status` failed инкрементирует `errors_count`.
+### Daily Stats Upsert
+`record_action` writes to both tables: `actions_log` (separate row) and `daily_stats` (upsert increment). The updated column depends on `action_type` (maps to `{type}s_count`), and `status` failed increments `errors_count`.
 
 ---
 
-## Крайние случаи
+## Edge Cases
 
-| Ситуация | Ожидаемое поведение |
-|----------|-------------------|
-| Нет YAML-файлов аккаунтов в директории | `load_accounts` возвращает пустой список, логирует предупреждение |
-| Аккаунт ссылается на несуществующий persona_id | Предупреждение в логе, аккаунт загружается с `persona = None` |
-| Невалидный формат YAML | Pydantic validation error |
-| `daily_limit` с [min > max] | `random.randint` бросает ValueError |
-| `check_allowed` при пустом actions_log | Счёт = 0, всегда разрешено (если лимит не [0, 0]) |
-| `record_action` без существующей строки daily_stats | INSERT создаёт новую строку через UPSERT |
-| Несколько вызовов `check_allowed` между действиями | Счёт не меняется пока не вызван `record_action` |
+| Situation | Expected Behavior |
+|-----------|-------------------|
+| No account YAML files in directory | `load_accounts` returns empty list, logs warning |
+| Account references non-existent persona_id | Warning logged, account loads with `persona = None` |
+| Invalid YAML format | Pydantic validation error |
+| `daily_limit` with [min > max] | `random.randint` raises ValueError |
+| `check_allowed` with empty actions_log | Count = 0, always allowed (unless limit is [0, 0]) |
+| `record_action` without existing daily_stats row | INSERT creates new row via UPSERT |
+| Multiple `check_allowed` calls between actions | Count doesn't change until `record_action` is called |
 
 ---
 
-## Приоритет и зависимости
+## Priority and Dependencies
 
-- **Приоритет:** Высокий (все модули зависят от конфигов аккаунтов и лимитов)
-- **Зависит от:** `src/db/` (таблицы actions_log и daily_stats должны существовать)
-- **Блокирует:** `src/activity/` (ActivityExecutor использует ActionLimiter), `src/scheduler/` (загружает аккаунты при старте)
+- **Priority:** High (all modules depend on account configs and limits)
+- **Depends on:** `src/db/` (actions_log and daily_stats tables must exist)
+- **Blocks:** `src/activity/` (ActivityExecutor uses ActionLimiter), `src/scheduler/` (loads accounts at startup)

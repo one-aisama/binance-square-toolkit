@@ -1,233 +1,233 @@
 # PROJECT_IDEA — Binance Square Toolkit
-# Версия: 1.0 | Дата: 2026-03-25
+# Version: 1.0 | Date: 2026-03-25
 
 ---
 
-## 1. Проблема
+## 1. Problem
 
-Вести 6+ аккаунтов Binance Square вручную невозможно. Каждый аккаунт требует:
-- 3-5 уникальных постов в день (18-30 постов суммарно)
-- 30-60 лайков в день на аккаунт
-- 12-24 комментария в день на аккаунт
-- Мониторинг трендов каждые 2-4 часа
-- Уникальный стиль написания для каждой персоны
+Managing 6+ Binance Square accounts manually is impossible. Each account requires:
+- 3-5 unique posts per day (18-30 posts total)
+- 30-60 likes per day per account
+- 12-24 comments per day per account
+- Trend monitoring every 2-4 hours
+- Unique writing style for each persona
 
-Ручная работа на 1 аккаунт: ~2-3 часа/день. На 6 аккаунтов: 12-18 часов/день — нереально для одного человека.
+Manual work per 1 account: ~2-3 hours/day. For 6 accounts: 12-18 hours/day — unrealistic for one person.
 
-Текущая ситуация: ручной постинг с 1-2 аккаунтов, пропуск пиковых окон, нет системного анализа трендов, нет движка активности (лайки/комменты). Результат: низкий охват, минимальный доход от W2E.
+Current situation: manual posting from 1-2 accounts, missing peak windows, no systematic trend analysis, no activity engine (likes/comments). Result: low reach, minimal W2E revenue.
 
-Если не решить: возможность Write to Earn (5% комиссия от торговых сборов читателей) остаётся неиспользованной. Каждый аккаунт с качественным контентом генерирует пассивный доход от торговой активности читателей. 6 аккаунтов с разными нишами покрывают больше сегментов аудитории.
-
----
-
-## 2. Решение
-
-Тулкит — набор Python-функций, которыми управляет AI-агент (Claude, Codex и т.д.). **Софт не принимает решений** — агент решает что постить, когда и как. Софт = руки, агент = мозг.
-
-- Шаг 1: Агент вызывает функции парсера → получает топ-10 трендовых тем (хэштеги, монеты, engagement-скоры) из ленты и статей Binance Square
-- Шаг 2: Агент выбирает темы для каждого аккаунта на основе конфига персоны (DeFi Analyst получает DeFi-темы, Crypto Trader — ценовые темы)
-- Шаг 3: Агент получает свежие рыночные данные (цены, изменение за 24ч, объём) через публичный API Binance
-- Шаг 4: Агент генерирует контент через AI (Claude/OpenAI) — используя `ContentGenerator` и `CommentGenerator` как инструменты. Стиль персоны, реальные цифры, трендовые кэштеги и хэштеги
-- Шаг 5: Агент вызывает функции публикации — текстовые посты через Playwright CDP (требуются client-side подписи), лайки через httpx
-- Шаг 6: Агент запускает цикл активности — лайки трендовых постов, комменты к высокоохватным постам (>1000 просмотров), подписки на релевантных авторов
-- Шаг 7: Все действия логируются в SQLite (actions_log, daily_stats) для трекинга и контроля лимитов
+If not solved: the Write to Earn opportunity (5% commission from readers' trading fees) remains untapped. Each account with quality content generates passive revenue from readers' trading activity. 6 accounts with different niches cover more audience segments.
 
 ---
 
-## 3. Почему сейчас
+## 2. Solution
 
-- **Write to Earn активен**: Binance платит 5% базовой торговой комиссии от читателей, которые торгуют после прочтения контента. Программа работает и принимает авторов.
-- **Binance Square растёт**: Binance активно продвигает Square как свой социальный слой. Больше пользователей = больше потенциальных читателей = больше комиссии.
-- **AI-генерация контента созрела**: Claude и GPT-4 генерируют контент, неотличимый от человеческого, при правильном промптинге с реальными данными и ограничениями персоны.
-- **Техническая осуществимость подтверждена**: Spike-тестирование (2026-03-24) проверило все критичные пути — парсинг, постинг, лайки, комменты, подписки работают. Архитектура (httpx + Playwright CDP) валидирована.
-- **Низкая конкуренция в автоматизации**: Большинство ботов Binance Square примитивные (шаблонные, без вариации персон, очевидные AI-паттерны). Тулкит с разнообразными персонами и реальными рыночными данными имеет преимущество в качестве.
+The toolkit is a set of Python functions controlled by an AI agent (Claude, Codex, etc.). **The software does not make decisions** — the agent decides what to post, when, and how. Software = hands, agent = brain.
 
----
-
-## 4. Целевая аудитория
-
-**Основная: Рахим (личный проект)**
-- Роль: единственный оператор 6+ аккаунтов Binance Square
-- Задача: автоматизация создания контента и engagement для максимизации W2E-дохода
-- Текущие инструменты: ручной постинг, без автоматизации
-- Готовность платить: N/A (строит сам)
-
-**Вторичная: крипто-контент-мейкеры (потенциал на будущее)**
-- Роль: авторы, монетизирующие через W2E с нескольких аккаунтов
-- Задача: масштабировать контент без потери качества и без бана
-- Текущие инструменты: ручной постинг, универсальные планировщики (не поддерживают Binance Square)
-- Готовность платить: $50-200/мес за управляемый аккаунт (если продуктизировать)
+- Step 1: Agent calls parser functions → gets top 10 trending topics (hashtags, coins, engagement scores) from Binance Square feed and articles
+- Step 2: Agent selects topics for each account based on persona config (DeFi Analyst gets DeFi topics, Crypto Trader gets price topics)
+- Step 3: Agent fetches fresh market data (prices, 24h change, volume) via Binance public API
+- Step 4: Agent generates content via AI (Claude/OpenAI) — using `ContentGenerator` and `CommentGenerator` as tools. Persona style, real numbers, trending cashtags and hashtags
+- Step 5: Agent calls publishing functions — text posts via Playwright CDP (requires client-side signatures), likes via httpx
+- Step 6: Agent runs activity cycle — liking trending posts, commenting on high-reach posts (>1000 views), following relevant authors
+- Step 7: All actions logged to SQLite (actions_log, daily_stats) for tracking and limit control
 
 ---
 
-## 5. Архитектура
+## 3. Why Now
+
+- **Write to Earn is active**: Binance pays 5% base trading commission from readers who trade after reading content. The program is running and accepting authors.
+- **Binance Square is growing**: Binance actively promotes Square as its social layer. More users = more potential readers = more commission.
+- **AI content generation has matured**: Claude and GPT-4 generate content indistinguishable from human-written, with proper prompting using real data and persona constraints.
+- **Technical feasibility confirmed**: Spike testing (2026-03-24) verified all critical paths — parsing, posting, liking, commenting, following work. Architecture (httpx + Playwright CDP) validated.
+- **Low competition in automation**: Most Binance Square bots are primitive (templated, no persona variation, obvious AI patterns). A toolkit with diverse personas and real market data has a quality advantage.
+
+---
+
+## 4. Target Audience
+
+**Primary: Rahim (personal project)**
+- Role: sole operator of 6+ Binance Square accounts
+- Task: automate content creation and engagement to maximize W2E revenue
+- Current tools: manual posting, no automation
+- Willingness to pay: N/A (building it himself)
+
+**Secondary: crypto content makers (future potential)**
+- Role: authors monetizing through W2E with multiple accounts
+- Task: scale content without losing quality and without getting banned
+- Current tools: manual posting, generic schedulers (don't support Binance Square)
+- Willingness to pay: $50-200/month per managed account (if productized)
+
+---
+
+## 5. Architecture
 
 ```
-АГЕНТ (Claude / Codex / любой AI)
-  │ получает задание от человека
-  │ анализирует тренды, генерирует контент
-  │ вызывает функции тулкита:
+AGENT (Claude / Codex / any AI)
+  │ receives task from human
+  │ analyzes trends, generates content
+  │ calls toolkit functions:
   │
-  ├── ПАРСИНГ (httpx + захваченные cookies)
-  │     ├── get_feed_recommend()       — рекомендованная лента
-  │     ├── get_top_articles()         — трендовые статьи
-  │     ├── get_fear_greed()           — индекс страха/жадности
-  │     ├── get_hot_hashtags()         — горячие хэштеги
-  │     └── get_market_data()          — цены монет (публичный API Binance)
+  ├── PARSING (httpx + captured cookies)
+  │     ├── get_feed_recommend()       — recommended feed
+  │     ├── get_top_articles()         — trending articles
+  │     ├── get_fear_greed()           — fear/greed index
+  │     ├── get_hot_hashtags()         — hot hashtags
+  │     └── get_market_data()          — coin prices (Binance public API)
   │
-  ├── ДЕЙСТВИЯ через httpx
-  │     └── like_post()                — лайк поста
+  ├── ACTIONS via httpx
+  │     └── like_post()                — like a post
   │
-  ├── ДЕЙСТВИЯ через Playwright CDP (браузер AdsPower)
-  │     ├── create_post()              — пост: текст + график + sentiment
-  │     ├── create_article()           — статья с обложкой
-  │     ├── repost()                   — цитата/репост
-  │     ├── comment_on_post()          — коммент (обработка Follow & Reply)
-  │     ├── follow_author()            — подписка (проверка состояния)
-  │     └── browse_and_interact()      — обход ленты + взаимодействие
+  ├── ACTIONS via Playwright CDP (AdsPower browser)
+  │     ├── create_post()              — post: text + chart + sentiment
+  │     ├── create_article()           — article with cover
+  │     ├── repost()                   — quote/repost
+  │     ├── comment_on_post()          — comment (Follow & Reply handling)
+  │     ├── follow_author()            — follow (state check)
+  │     └── browse_and_interact()      — feed browsing + interaction
   │
-  ├── МЕНЕДЖЕР СЕССИЙ
-  │     ├── AdsPowerClient             — запуск/остановка профилей
-  │     ├── harvester                  — захват credentials через CDP
-  │     ├── credential_store           — CRUD в SQLite для cookies/headers
-  │     └── validator                  — проверка живости credentials
+  ├── SESSION MANAGER
+  │     ├── AdsPowerClient             — start/stop profiles
+  │     ├── harvester                  — credential capture via CDP
+  │     ├── credential_store           — CRUD in SQLite for cookies/headers
+  │     └── validator                  — credential liveness check
   │
-  ├── АККАУНТЫ
-  │     ├── manager                    — загрузка YAML-конфигов
-  │     ├── limiter                    — дневные лимиты действий
-  │     └── anti_detect                — изоляция аккаунтов
+  ├── ACCOUNTS
+  │     ├── manager                    — YAML config loading
+  │     ├── limiter                    — daily action limits
+  │     └── anti_detect                — account isolation
   │
-  └── БД (SQLite, WAL mode)
+  └── DB (SQLite, WAL mode)
         └── credentials, actions_log, daily_stats, content_queue,
             parsed_trends, parsed_posts, discovered_endpoints
 ```
 
-**Стек с обоснованием:**
-- **Python 3.12** — развитая async-экосистема, лучшая поддержка AI SDK (anthropic, openai)
-- **httpx** — async HTTP-клиент, быстрее requests, поддерживает HTTP/2
-- **Playwright CDP** — подключение к профилям AdsPower через Chrome DevTools Protocol. Требуется для постинга (client-side nonce + signature) и комментирования (DOM-based input)
-- **SQLite (WAL mode)** — zero-config, один файл, достаточно для 6 аккаунтов (~200 действий/день)
-- **APScheduler** — лёгкий cron-подобный планировщик, работает in-process. Опционален — агент может запускать циклы сам
-- **AdsPower** — антидетект-браузер с отдельными профилями (уникальный fingerprint, прокси, cookies)
-- **YAML** — человекочитаемые конфиги для аккаунтов и персон
+**Stack with justification:**
+- **Python 3.12** — mature async ecosystem, best AI SDK support (anthropic, openai)
+- **httpx** — async HTTP client, faster than requests, supports HTTP/2
+- **Playwright CDP** — connection to AdsPower profiles via Chrome DevTools Protocol. Required for posting (client-side nonce + signature) and commenting (DOM-based input)
+- **SQLite (WAL mode)** — zero-config, single file, sufficient for 6 accounts (~200 actions/day)
+- **APScheduler** — lightweight cron-like scheduler, runs in-process. Optional — agent can run cycles itself
+- **AdsPower** — anti-detect browser with separate profiles (unique fingerprint, proxy, cookies)
+- **YAML** — human-readable configs for accounts and personas
 
 ---
 
-## 6. Монетизация
+## 6. Monetization
 
-Это личный инструмент, не SaaS. Доход от Binance Write to Earn.
+This is a personal tool, not a SaaS. Revenue from Binance Write to Earn.
 
-| Источник | Механизм | Ожидаемый доход |
-|----------|----------|-----------------|
-| Write to Earn | 5% от базовой торговой комиссии читателей | Зависит от активности читателей |
-| На аккаунт | 3-5 постов/день, каждый пост достигает читателей | Неизвестно до live-тестирования |
-| 6 аккаунтов | 6 ниш, покрывающих широкую аудиторию | 6x дохода одного аккаунта |
+| Source | Mechanism | Expected Revenue |
+|--------|-----------|-----------------|
+| Write to Earn | 5% of readers' base trading commission | Depends on reader activity |
+| Per account | 3-5 posts/day, each post reaches readers | Unknown until live testing |
+| 6 accounts | 6 niches covering a wide audience | 6x single account revenue |
 
-Модель дохода комиссионная: больше качественного контента → больше читателей → больше торговой активности → больше комиссии. Нет начальных затрат кроме инфраструктуры (прокси, AI API).
+Revenue model is commission-based: more quality content → more readers → more trading activity → more commission. No upfront costs besides infrastructure (proxies, AI API).
 
-**Структура расходов:**
-- AI API: ~$5-15/день (Claude/OpenAI на 20-30 постов + 70-140 комментов)
-- Прокси (iProxy): ~$30/мес за 6 мобильных прокси
-- AdsPower: ~$10/мес (базовый план)
-- Итого: ~$200-500/мес
+**Cost structure:**
+- AI API: ~$5-15/day (Claude/OpenAI for 20-30 posts + 70-140 comments)
+- Proxies (iProxy): ~$30/month for 6 mobile proxies
+- AdsPower: ~$10/month (basic plan)
+- Total: ~$200-500/month
 
-Точка безубыточности: ~$200-500/мес W2E-комиссий с 6 аккаунтов.
-
----
-
-## 7. Конкуренты
-
-| Конкурент | Что делает | Чего не хватает | Наше преимущество |
-|-----------|-----------|-----------------|-------------------|
-| Ручной постинг | Человек пишет и публикует | Не масштабируется дальше 1-2 аккаунтов, пропускает тренды | Полная автоматизация, 6+ аккаунтов, real-time данные трендов |
-| Универсальные планировщики (Buffer, Hootsuite) | Планирование постов по платформам | Нет поддержки Binance Square, нет генерации контента | Нативная интеграция с Binance Square, AI-контент |
-| Шаблонные боты | Автопостинг по шаблонам | Повторяющийся контент, нет вариации персон, легко детектится | 6 уникальных персон, реальные рыночные данные, человеческий стиль |
-| ChatGPT вручную | Человек использует ChatGPT для черновиков | Всё ещё ручная публикация, нет анализа трендов, нет активности | End-to-end: парсинг → генерация → публикация → engagement |
+Break-even point: ~$200-500/month in W2E commissions from 6 accounts.
 
 ---
 
-## 8. План запуска
+## 7. Competitors
 
-| Фаза | Цель | Метрика успеха | Сроки |
-|------|------|---------------|-------|
-| MVP (Фаза 1) | Парсер + Контент-движок (текст) + Менеджер аккаунтов + Планировщик на 1 аккаунте | 1 аккаунт публикует 3-5 постов/день автоматически 7 дней без бана | 2 недели |
-| Фаза 2 | Медиа-посты + Движок активности + AdsPower мульти-профиль + масштабирование до 6 аккаунтов | 6 аккаунтов работают одновременно, каждый с лайками/комментами/постами | 3-4 недели после MVP |
-| Фаза 3 | Аналитика, A/B тестирование, оптимизация | Дашборд с engagement по аккаунтам, трекинг дохода, авто-подстройка частоты постинга | 2-3 недели после Фазы 2 |
-
-**Scope MVP (Фаза 1):**
-- Парсер: feed recommend, top articles, fear & greed, hot hashtags, market data
-- Контент-движок: AI-генерация текста через `ContentGenerator` (инструмент агента) со стилями персон, публикация через Playwright CDP
-- Менеджер аккаунтов: загрузка YAML-конфигов, логирование в SQLite, дневные лимиты
-- Планировщик: APScheduler для циклов парсинг→генерация→публикация каждые 2 часа (опционален — агент может управлять циклами напрямую)
-- Тестирование на 1 аккаунте
+| Competitor | What it does | What it lacks | Our advantage |
+|-----------|-------------|--------------|---------------|
+| Manual posting | Human writes and publishes | Doesn't scale beyond 1-2 accounts, misses trends | Full automation, 6+ accounts, real-time trend data |
+| Generic schedulers (Buffer, Hootsuite) | Post scheduling across platforms | No Binance Square support, no content generation | Native Binance Square integration, AI content |
+| Template bots | Auto-posting from templates | Repetitive content, no persona variation, easily detected | 6 unique personas, real market data, human-like style |
+| ChatGPT manually | Human uses ChatGPT for drafts | Still manual publishing, no trend analysis, no activity | End-to-end: parsing → generation → publishing → engagement |
 
 ---
 
-## 9. Риски
+## 8. Launch Plan
 
-| Риск | Вероятность | Влияние | Митигация |
-|------|------------|---------|-----------|
-| Бан аккаунта за автоматизацию | Средняя | Высокое — потеря аккаунта + W2E-допуска | Консервативные лимиты, человеческие задержки (30-120с между действиями), уникальные прокси, разнообразные стили контента, никаких взаимодействий между своими аккаунтами |
-| Изменение условий W2E или закрытие программы | Средняя | Высокое — вся модель дохода рушится | Мониторинг объявлений, диверсификация (не полагаться только на W2E), держать расходы низкими |
-| Изменение bapi-эндпоинтов без уведомления | Высокая | Среднее — парсер ломается | Модульный парсер с таблицей обнаруженных эндпоинтов, credential harvester может перезахватить, fallback на CDP для всех действий |
-| AI-контент помечен Binance | Средняя | Среднее — посты скрыты или аккаунт отмечен (Binance трекает `isCreatedByAI`) | Реальные рыночные данные, промпты под персону, вариация структуры предложений, без AI-клише, ручная проверка первой партии |
-| Обнаружение паттернов между аккаунтами | Низкая | Высокое — все 6 аккаунтов забанены | Отдельные прокси (iProxy mobile), отдельные профили AdsPower, без пересечения контента, разные расписания постинга, никаких кросс-взаимодействий |
-| Юнит-экономика не работает (5% слишком мало) | Средняя | Среднее — проект не стоит усилий | Тест на 1 аккаунте (MVP), замер реального W2E-дохода до масштабирования |
-| Нестабильность AdsPower API | Низкая | Низкое — можно перейти на прямой Playwright | Абстракция управления браузером за интерфейсом, поддержка и AdsPower, и прямого запуска |
+| Phase | Goal | Success Metric | Timeline |
+|-------|------|---------------|----------|
+| MVP (Phase 1) | Parser + Content Engine (text) + Account Manager + Scheduler on 1 account | 1 account publishes 3-5 posts/day automatically for 7 days without ban | 2 weeks |
+| Phase 2 | Media posts + Activity Engine + AdsPower multi-profile + scaling to 6 accounts | 6 accounts running simultaneously, each with likes/comments/posts | 3-4 weeks after MVP |
+| Phase 3 | Analytics, A/B testing, optimization | Dashboard with engagement by account, revenue tracking, auto-adjust posting frequency | 2-3 weeks after Phase 2 |
+
+**MVP Scope (Phase 1):**
+- Parser: feed recommend, top articles, fear & greed, hot hashtags, market data
+- Content engine: AI text generation via `ContentGenerator` (agent tool) with persona styles, publishing via Playwright CDP
+- Account manager: YAML config loading, SQLite logging, daily limits
+- Scheduler: APScheduler for parsing→generation→publishing cycles every 2 hours (optional — agent can manage cycles directly)
+- Testing on 1 account
 
 ---
 
-## 10. Технические детали
+## 9. Risks
 
-### Структура репозитория
+| Risk | Probability | Impact | Mitigation |
+|------|------------|--------|-----------|
+| Account ban for automation | Medium | High — loss of account + W2E access | Conservative limits, human delays (30-120s between actions), unique proxies, diverse content styles, no interactions between own accounts |
+| W2E terms change or program closure | Medium | High — entire revenue model collapses | Monitor announcements, diversify (don't rely solely on W2E), keep costs low |
+| Bapi endpoint changes without notice | High | Medium — parser breaks | Modular parser with discovered endpoints table, credential harvester can recapture, fallback to CDP for all actions |
+| AI content flagged by Binance | Medium | Medium — posts hidden or account flagged (Binance tracks `isCreatedByAI`) | Real market data, persona-tuned prompts, sentence structure variation, no AI cliches, manual review of first batch |
+| Cross-account pattern detection | Low | High — all 6 accounts banned | Separate proxies (iProxy mobile), separate AdsPower profiles, no content overlap, different posting schedules, no cross-interactions |
+| Unit economics don't work (5% is too little) | Medium | Medium — project not worth the effort | Test on 1 account (MVP), measure actual W2E revenue before scaling |
+| AdsPower API instability | Low | Low — can switch to direct Playwright | Browser management abstracted behind an interface, support for both AdsPower and direct launch |
+
+---
+
+## 10. Technical Details
+
+### Repository Structure
 ```
 binance_square/
-  docs/              — спецификации, дизайн-документы
+  docs/              — specifications, design documents
   src/
     main.py          — entry point, lifecycle
-    parser/          — парсинг bapi (feed, статьи, тренды, рыночные данные)
-    content/         — AI-генерация контента (инструменты агента) + публикация
-    activity/        — лайки, комменты, репосты, подписки
-    accounts/        — менеджер аккаунтов, лимитер, антидетект
-    session/         — AdsPower-клиент, harvester, browser_actions, validator
+    parser/          — bapi parsing (feed, articles, trends, market data)
+    content/         — AI content generation (agent tools) + publishing
+    activity/        — likes, comments, reposts, follows
+    accounts/        — account manager, limiter, anti-detect
+    session/         — AdsPower client, harvester, browser_actions, validator
     bapi/            — BapiClient (httpx + credentials + retry + rate limit)
-    db/              — SQLite-модели, инициализация
-    scheduler/       — APScheduler (опционально)
+    db/              — SQLite models, initialization
+    scheduler/       — APScheduler (optional)
   config/
-    accounts/        — YAML-конфиги аккаунтов
-    personas.yaml    — 6 определений персон
-    settings.yaml    — глобальные настройки
-    content_rules.yaml — правила генерации контента (для агента)
-  tests/             — pytest-тесты (~67)
-  .env               — API-ключи (не коммитится)
+    accounts/        — account YAML configs
+    personas.yaml    — 6 persona definitions
+    settings.yaml    — global settings
+    content_rules.yaml — content generation rules (for the agent)
+  tests/             — pytest tests (~67)
+  .env               — API keys (not committed)
 ```
 
-### Ключевые таблицы БД (SQLite)
+### Key DB Tables (SQLite)
 
-| Таблица | Ключевые поля | Назначение |
-|---------|--------------|------------|
-| credentials | account_id, cookies, headers, harvested_at, expires_at | Захваченные bapi credentials |
-| actions_log | account_id, action_type, target_id, status, created_at | Каждое действие для аудита + контроля лимитов |
-| daily_stats | account_id, date, posts, likes, comments, errors | Дневная статистика |
-| content_queue | account_id, content, topic, status, scheduled_at | Контент в очереди на публикацию |
-| parsed_trends | hashtag, coin, engagement_score, parsed_at | Агрегированные данные трендов |
-| parsed_posts | post_id, author, views, likes, comments, card_type, parsed_at | Сырые спарсенные посты |
-| discovered_endpoints | url, method, headers, body_schema, discovered_at | Обнаруженные bapi-эндпоинты |
+| Table | Key Fields | Purpose |
+|-------|-----------|---------|
+| credentials | account_id, cookies, headers, harvested_at, expires_at | Captured bapi credentials |
+| actions_log | account_id, action_type, target_id, status, created_at | Every action for audit + limit control |
+| daily_stats | account_id, date, posts, likes, comments, errors | Daily statistics |
+| content_queue | account_id, content, topic, status, scheduled_at | Content queued for publishing |
+| parsed_trends | hashtag, coin, engagement_score, parsed_at | Aggregated trend data |
+| parsed_posts | post_id, author, views, likes, comments, card_type, parsed_at | Raw parsed posts |
+| discovered_endpoints | url, method, headers, body_schema, discovered_at | Discovered bapi endpoints |
 
-### Внешние API
+### External APIs
 
-| API | Назначение | Аутентификация |
-|-----|-----------|----------------|
-| Binance bapi (internal) | Парсинг ленты, лайки | Захваченные cookies + headers (csrftoken, bnc-uuid, fvideo-id, fvideo-token) |
-| Binance public market API | Цены монет, объём, изменение за 24ч | Нет (публичный) |
-| Claude API (Anthropic) | Генерация контента (инструмент агента) | ANTHROPIC_API_KEY |
-| OpenAI API | Генерация контента (fallback) | OPENAI_API_KEY |
-| AdsPower local API | Запуск/остановка профилей браузера | Локальный HTTP (localhost:50325) |
+| API | Purpose | Authentication |
+|-----|---------|---------------|
+| Binance bapi (internal) | Feed parsing, likes | Captured cookies + headers (csrftoken, bnc-uuid, fvideo-id, fvideo-token) |
+| Binance public market API | Coin prices, volume, 24h change | None (public) |
+| Claude API (Anthropic) | Content generation (agent tool) | ANTHROPIC_API_KEY |
+| OpenAI API | Content generation (fallback) | OPENAI_API_KEY |
+| AdsPower local API | Start/stop browser profiles | Local HTTP (localhost:50325) |
 
-### Специальные требования
-- **Антидетект**: каждый аккаунт должен использовать уникальный прокси (iProxy mobile), уникальный профиль AdsPower (fingerprint), уникальное расписание постинга
-- **Контроль лимитов**: дневные лимиты на аккаунт (посты: 3-5, лайки: 30-60, комменты: 12-24) с минимум 90с между действиями
-- **Жизненный цикл credentials**: захват через CDP → хранение в SQLite → использование в httpx → периодическая валидация → перезахват при истечении
-- **10 обязательных bapi-заголовков**: csrftoken, bnc-uuid, device-info, fvideo-id, fvideo-token, clienttype, lang, bnc-location, versioncode, user-agent. Без fvideo-* заголовков bapi возвращает `data: null`.
+### Special Requirements
+- **Anti-detect**: each account must use a unique proxy (iProxy mobile), unique AdsPower profile (fingerprint), unique posting schedule
+- **Limit control**: daily limits per account (posts: 3-5, likes: 30-60, comments: 12-24) with minimum 90s between actions
+- **Credential lifecycle**: capture via CDP → store in SQLite → use in httpx → periodic validation → recapture on expiration
+- **10 required bapi headers**: csrftoken, bnc-uuid, device-info, fvideo-id, fvideo-token, clienttype, lang, bnc-location, versioncode, user-agent. Without fvideo-* headers, bapi returns `data: null`.
 
 ---

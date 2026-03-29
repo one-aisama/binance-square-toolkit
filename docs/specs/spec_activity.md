@@ -1,31 +1,31 @@
-# Спецификация: Модуль Activity
+# Specification: Activity Module
 
-**Путь:** `src/activity/`
-**Файлы:** `executor.py`, `target_selector.py`, `randomizer.py`, `comment_gen.py`
-
----
-
-## Описание
-
-Модуль Activity предоставляет инструменты для взаимодействия с постами Binance Square: лайки, комментарии, репосты и подписки. Включает выбор целей (какие посты для взаимодействия), человекоподобную рандомизацию (задержки и пропуски) и AI-генерацию комментариев. Агент вызывает эти функции для проведения циклов вовлечения — модуль НЕ решает автономно, с чем взаимодействовать.
-
-`CommentGenerator` — это инструмент, который вызывает агент. Софт не генерирует контент самостоятельно: агент решает, какому посту нужен комментарий, и вызывает генератор для создания текста.
+**Path:** `src/activity/`
+**Files:** `executor.py`, `target_selector.py`, `randomizer.py`, `comment_gen.py`
 
 ---
 
-## Пользовательские сценарии
+## Description
 
-- Как агент, я хочу запустить цикл лайк/комментарий/репост на списке распарсенных постов, чтобы наращивать вовлечённость для аккаунта.
-- Как агент, я хочу, чтобы посты фильтровались для исключения моих собственных аккаунтов и низкововлечённого контента, чтобы никогда не взаимодействовать со своими постами и фокусироваться на высоковидимом контенте.
-- Как агент, я хочу человекоподобные случайные задержки между действиями и вероятностные пропуски, чтобы паттерны активности выглядели естественно.
-- Как агент, я хочу AI-сгенерированные комментарии, которые звучат как реальный человек, отвечающий на конкретный пост, чтобы комментарии были релевантными, а не шаблонными.
-- Как агент, я хочу, чтобы дневные лимиты применялись для каждого типа действий, чтобы аккаунты не превышали безопасные пороги активности.
+The Activity module provides tools for interacting with Binance Square posts: likes, comments, reposts, and follows. Includes target selection (which posts to interact with), human-like randomization (delays and skips), and AI comment generation. The agent calls these functions to run engagement cycles — the module does NOT autonomously decide what to interact with.
+
+`CommentGenerator` is a tool that the agent calls. The software does not generate content on its own: the agent decides which post needs a comment and calls the generator to produce the text.
 
 ---
 
-## Модель данных
+## User Stories
 
-Собственных таблиц нет. Модуль читает/пишет через `ActionLimiter` (из `src/accounts/limiter.py`), который использует таблицы `actions_log` и `daily_stats`.
+- As an agent, I want to run a like/comment/repost cycle on a list of parsed posts, so I can build engagement for an account.
+- As an agent, I want posts to be filtered to exclude my own accounts and low-engagement content, so I never interact with my own posts and focus on high-visibility content.
+- As an agent, I want human-like random delays between actions and probabilistic skips, so activity patterns look natural.
+- As an agent, I want AI-generated comments that sound like a real person responding to a specific post, so comments are relevant rather than templated.
+- As an agent, I want daily limits enforced for each action type, so accounts don't exceed safe activity thresholds.
+
+---
+
+## Data Model
+
+No own tables. The module reads/writes through `ActionLimiter` (from `src/accounts/limiter.py`), which uses the `actions_log` and `daily_stats` tables.
 
 ---
 
@@ -45,16 +45,16 @@ class ActivityExecutor:
     )
 ```
 
-| Метод | Сигнатура | Возвращает |
-|-------|-----------|------------|
+| Method | Signature | Returns |
+|--------|-----------|---------|
 | `run_cycle` | `(account_id: str, posts: list[dict], limits: dict[str, list[int]]) -> dict[str, int]` | `{"likes": N, "comments": N, "reposts": N, "skipped": N, "errors": N}` |
 
-**Поведение цикла:**
-1. **Лайки:** Выбирает `random.randint(*limits["like"])` целей. Для каждой: проверить дневной лимит, возможно пропустить (randomizer), вызвать `BapiClient.like_post()`.
-2. **Комментарии:** Выбирает `random.randint(*limits["comment"])` целей из высокововлечённых постов. Для каждой: проверить лимит, возможно пропустить, сгенерировать текст комментария через `CommentGenerator`, вызвать `BapiClient.comment_post()` (сейчас stub — бросает `NotImplementedError`).
-3. **Репосты:** Выбирает `random.randint(*limits["repost"])` топ-постов. Тот же поток, что и комментарии, но вызывает `BapiClient.repost()` (stub).
+**Cycle behavior:**
+1. **Likes:** Selects `random.randint(*limits["like"])` targets. For each: check daily limit, possibly skip (randomizer), call `BapiClient.like_post()`.
+2. **Comments:** Selects `random.randint(*limits["comment"])` targets from high-engagement posts. For each: check limit, possibly skip, generate comment text via `CommentGenerator`, call `BapiClient.comment_post()` (currently a stub — raises `NotImplementedError`).
+3. **Reposts:** Selects `random.randint(*limits["repost"])` top posts. Same flow as comments, but calls `BapiClient.repost()` (stub).
 
-Когда stub бросает `NotImplementedError`, цикл прерывается с warning в лог. Это ожидаемое поведение, пока комментарии/репосты не подключены к `browser_actions`.
+When a stub raises `NotImplementedError`, the cycle breaks with a warning logged. This is expected behavior until comments/reposts are connected to `browser_actions`.
 
 ---
 
@@ -65,15 +65,15 @@ class TargetSelector:
     def __init__(self, own_account_ids: set[str], min_views: int = 1000)
 ```
 
-| Метод | Сигнатура | Возвращает |
-|-------|-----------|------------|
-| `select_like_targets` | `(posts: list[dict], count: int) -> list[dict]` | Случайная выборка из подходящих постов |
-| `select_comment_targets` | `(posts: list[dict], count: int) -> list[dict]` | Из верхней половины по просмотрам, перемешано |
-| `select_repost_targets` | `(posts: list[dict], count: int) -> list[dict]` | Топ-посты по просмотрам |
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `select_like_targets` | `(posts: list[dict], count: int) -> list[dict]` | Random sample from eligible posts |
+| `select_comment_targets` | `(posts: list[dict], count: int) -> list[dict]` | From top half by views, shuffled |
+| `select_repost_targets` | `(posts: list[dict], count: int) -> list[dict]` | Top posts by views |
 
-**Фильтрация (`_filter_eligible`):**
-- Исключает посты, где `author_id` есть в `own_account_ids`
-- Исключает посты с `view_count < min_views`
+**Filtering (`_filter_eligible`):**
+- Excludes posts where `author_id` is in `own_account_ids`
+- Excludes posts with `view_count < min_views`
 
 ---
 
@@ -84,9 +84,9 @@ class HumanRandomizer:
     def __init__(self, delay_range: tuple[int, int] = (30, 120), skip_rate: float = 0.35)
 ```
 
-| Метод | Сигнатура | Возвращает |
-|-------|-----------|------------|
-| `should_skip` | `() -> bool` | `True` с вероятностью `skip_rate` |
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `should_skip` | `() -> bool` | `True` with probability `skip_rate` |
 | `human_delay` | `() -> None` | `await asyncio.sleep(random.uniform(*delay_range))` |
 
 ---
@@ -98,59 +98,59 @@ class CommentGenerator:
     def __init__(self, provider: str = "deepseek", model: str = "deepseek-chat", api_key: str = "")
 ```
 
-| Метод | Сигнатура | Возвращает |
-|-------|-----------|------------|
-| `generate` | `(post_text: str, author_name: str = "") -> str` | Текст комментария (1-2 предложения) |
-| `generate_comment` | `(post_text: str, persona_style: str = "", comment_type: str \| None = None) -> str` | Обратно-совместимый алиас для `generate()` |
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `generate` | `(post_text: str, author_name: str = "") -> str` | Comment text (1-2 sentences) |
+| `generate_comment` | `(post_text: str, persona_style: str = "", comment_type: str \| None = None) -> str` | Backwards-compatible alias for `generate()` |
 
-**Провайдеры:** `"deepseek"` (через OpenAI-совместимый API на `api.deepseek.com`), `"openai"`, `"anthropic"`.
+**Providers:** `"deepseek"` (via OpenAI-compatible API at `api.deepseek.com`), `"openai"`, `"anthropic"`.
 
-**Системный промпт** обеспечивает:
-- Максимум 1-2 предложения
-- Релевантность конкретному содержанию поста
-- Разговорный, неформальный тон (обращение К автору)
-- Никаких шаблонных комментариев ("Great post!", "Thanks for sharing!")
-- Типы: согласие, вопрос, дополнение, мягкое несогласие
+**System prompt** ensures:
+- Maximum 1-2 sentences
+- Relevant to specific post content
+- Conversational, informal tone (talking TO the author)
+- No templated comments ("Great post!", "Thanks for sharing!")
+- Types: agreement, question, addition, mild disagreement
 
-Убирает обрамляющие кавычки из AI-вывода. Возвращает пустую строку при ошибке генерации.
-
----
-
-## Бизнес-логика
-
-### Антидетект
-- `TargetSelector` предотвращает взаимодействие с собственными аккаунтами
-- `HumanRandomizer` добавляет задержку 30-120 секунд между действиями
-- 35% действий случайно пропускается
-- Комментарии только к постам с >1000 просмотров (настраивается)
-
-### Контроль лимитов
-`ActivityExecutor` проверяет `ActionLimiter.check_allowed()` перед каждым действием. Лимитер использует детерминированный дневной лимит: `hash(account_id:date:action_type)` задаёт seed для RNG, который выбирает число в настроенном диапазоне `[min, max]`. Один и тот же аккаунт+дата+тип всегда получает один и тот же лимит.
-
-### Генерация комментариев vs browser_actions
-Два пути для комментирования:
-1. **ActivityExecutor** вызывает `BapiClient.comment_post()` — сейчас stub (NotImplementedError)
-2. **browser_actions.browse_and_interact()** принимает экземпляр `CommentGenerator` и комментирует через DOM
-
-Сейчас работает только путь 2. Путь 1 заработает, если/когда будет обнаружен bapi-эндпоинт для комментариев.
+Strips wrapping quotes from AI output. Returns empty string on generation error.
 
 ---
 
-## Крайние случаи
+## Business Logic
 
-| Ситуация | Ожидаемое поведение |
-|----------|---------------------|
-| Все посты отфильтрованы (свои аккаунты или мало просмотров) | `select_*_targets` возвращает пустой список, действия не выполняются |
-| `CommentGenerator` возвращает пустую строку | Executor должен использовать fallback-текст или пропустить комментарий |
-| `BapiClient.comment_post()` бросает NotImplementedError | Warning в лог, цикл комментариев прерывается, лайки всё ещё могут работать |
-| Дневной лимит уже достигнут | `check_allowed` возвращает False, цикл прерывается для этого типа действия |
-| Список `posts` пустой | Цели не выбираются, цикл возвращает все нули |
-| AI API недоступен | `CommentGenerator.generate()` возвращает пустую строку, ошибка логируется |
+### Anti-detect
+- `TargetSelector` prevents interaction with own accounts
+- `HumanRandomizer` adds 30-120 second delay between actions
+- 35% of actions are randomly skipped
+- Comments only on posts with >1000 views (configurable)
+
+### Limit Control
+`ActivityExecutor` checks `ActionLimiter.check_allowed()` before each action. The limiter uses a deterministic daily limit: `hash(account_id:date:action_type)` seeds the RNG, which picks a number in the configured range `[min, max]`. The same account+date+type always gets the same limit.
+
+### Comment Generation vs browser_actions
+Two paths for commenting:
+1. **ActivityExecutor** calls `BapiClient.comment_post()` — currently a stub (NotImplementedError)
+2. **browser_actions.browse_and_interact()** accepts a `CommentGenerator` instance and comments via DOM
+
+Currently only path 2 works. Path 1 will work if/when a bapi endpoint for comments is discovered.
 
 ---
 
-## Приоритет и зависимости
+## Edge Cases
 
-- **Приоритет:** Средний (лайки работают через httpx; комментарии/репосты требуют интеграции с browser_actions)
-- **Зависит от:** `src/bapi/client.py` (like_post), `src/accounts/limiter.py` (ActionLimiter), `src/session/browser_actions.py` (для комментариев/репостов через CDP)
-- **Блокирует:** Полные циклы активности в планировщике
+| Situation | Expected Behavior |
+|-----------|-------------------|
+| All posts filtered out (own accounts or low views) | `select_*_targets` returns empty list, no actions performed |
+| `CommentGenerator` returns empty string | Executor should use fallback text or skip the comment |
+| `BapiClient.comment_post()` raises NotImplementedError | Warning logged, comment cycle breaks, likes can still work |
+| Daily limit already reached | `check_allowed` returns False, cycle breaks for that action type |
+| `posts` list is empty | No targets selected, cycle returns all zeros |
+| AI API unavailable | `CommentGenerator.generate()` returns empty string, error is logged |
+
+---
+
+## Priority and Dependencies
+
+- **Priority:** Medium (likes work via httpx; comments/reposts require browser_actions integration)
+- **Depends on:** `src/bapi/client.py` (like_post), `src/accounts/limiter.py` (ActionLimiter), `src/session/browser_actions.py` (for comments/reposts via CDP)
+- **Blocks:** Full activity cycles in the scheduler

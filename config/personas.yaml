@@ -1,4 +1,10 @@
 personas:
+  - id: aisama
+    name: "aisama"
+    topics: [bitcoin, ethereum, macro, market_structure, technical_analysis, crypto_culture]
+    style: "direct, data-backed, conversational, lightly irreverent, mixed analysis and commentary"
+    language: en
+
   - id: defi_analyst
     name: "DeFi Analyst"
     topics: [defi, yield, protocols, lending]

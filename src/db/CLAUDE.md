@@ -1,37 +1,37 @@
-# Модуль: db
-# Назначение: SQLite схема и инициализация базы данных
-# Спецификация: docs/design-spec.md (раздел Database)
+# Module: db
+# Purpose: SQLite schema and database initialization
+# Specification: docs/design-spec.md (Database section)
 
-## Файлы
-| Файл | Строк | Что делает |
+## Files
+| File | Lines | What it does |
 |------|-------|------------|
-| database.py | 23 | init_db(db_path) — создание таблиц через SCHEMA_SQL, WAL mode; get_db_path() из env |
-| models.py | 90 | SCHEMA_SQL — DDL для всех таблиц |
+| database.py | 23 | init_db(db_path) — table creation via SCHEMA_SQL, WAL mode; get_db_path() from env |
+| models.py | 90 | SCHEMA_SQL — DDL for all tables |
 
-## Таблицы
-| Таблица | Назначение |
-|---------|------------|
-| credentials | Cookies + headers по аккаунтам, срок, флаг valid |
-| actions_log | Каждый like/comment/repost/post со статусом + ошибка |
-| daily_stats | Агрегированные счётчики по аккаунту в день |
-| content_queue | Сгенерированные посты ожидающие публикации |
-| parsed_trends | Снапшот тем + fear/greed за цикл парсинга |
-| parsed_posts | Сырые распарсенные посты для дедупликации |
-| discovered_endpoints | CDP-обнаруженные bapi endpoints с примерами |
-| post_tracker | Трекинг постов всех агентов: ID, тип, engagement метрики (supervisor) |
+## Tables
+| Table | Purpose |
+|-------|---------|
+| credentials | Cookies + headers per account, expiry, valid flag |
+| actions_log | Every like/comment/repost/post with status + error |
+| daily_stats | Aggregated counters per account per day |
+| content_queue | Generated posts awaiting publication |
+| parsed_trends | Snapshot of topics + fear/greed per parsing cycle |
+| parsed_posts | Raw parsed posts for deduplication |
+| discovered_endpoints | CDP-discovered bapi endpoints with examples |
+| post_tracker | Tracking posts of all agents: ID, type, engagement metrics (supervisor) |
 
-## Зависимости
-- Внутренних импортов нет
-- Используется: `session.credential_store`, `accounts.limiter`, `content.publisher`, `scheduler`
+## Dependencies
+- No internal imports
+- Used by: `session.credential_store`, `accounts.limiter`, `content.publisher`, `scheduler`
 
-## Ключевые функции
-- `init_db(db_path)` — идемпотентная (CREATE TABLE IF NOT EXISTS), безопасна при рестарте
-- `get_db_path()` — читает DB_PATH env var, по умолчанию "data/bsq.db"
+## Key Functions
+- `init_db(db_path)` — idempotent (CREATE TABLE IF NOT EXISTS), safe on restart
+- `get_db_path()` — reads DB_PATH env var, defaults to "data/bsq.db"
 
-## Типичные задачи
-- Добавить таблицу: DDL в SCHEMA_SQL в `models.py`, вызвать init_db (идемпотентно)
-- Сменить путь к БД: переменная окружения DB_PATH
-- Просмотреть данные: `sqlite3 data/bsq.db` — WAL mode, чтение неблокирующее
+## Common Tasks
+- Add a table: DDL in SCHEMA_SQL in `models.py`, call init_db (idempotent)
+- Change DB path: DB_PATH environment variable
+- View data: `sqlite3 data/bsq.db` — WAL mode, reads are non-blocking
 
-## Известные проблемы
-- Нет системы миграций — изменения схемы через ручной ALTER TABLE или пересоздание БД
+## Known Issues
+- No migration system — schema changes via manual ALTER TABLE or DB recreation

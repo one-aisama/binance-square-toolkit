@@ -1,150 +1,150 @@
-# Binance Square Toolkit — Дизайн-спецификация
-Дата: 2026-03-25
-Статус: Актуальный (после тестирования)
+# Binance Square Toolkit — Design Specification
+Date: 2026-03-25
+Status: Current (after testing)
 
-## Обзор
+## Overview
 
-SDK / тулкит для управления активностью на Binance Square через профили AdsPower.
-Софт НЕ принимает решений — им управляет AI-агент (Claude, Codex и т.д.).
-Агент получает задания от человека, анализирует, генерирует контент и вызывает функции тулкита.
+SDK / toolkit for managing activity on Binance Square through AdsPower profiles.
+The software does NOT make decisions — it is controlled by an AI agent (Claude, Codex, etc.).
+The agent receives tasks from a human, analyzes, generates content, and calls toolkit functions.
 
-**Софт = руки. Агент = мозг.**
+**Software = hands. Agent = brain.**
 
-Монетизация через Write to Earn (5% базовой торговой комиссии от читателей).
+Monetization through Write to Earn (5% base trading commission from readers).
 
-## Архитектура: Hybrid (httpx + Playwright CDP)
+## Architecture: Hybrid (httpx + Playwright CDP)
 
-После тестирования архитектура эволюционировала от чистого CDP-First:
-- **httpx** — парсинг (лента, статьи, тренды, рыночные данные), лайки. Быстро, без браузера.
-- **Playwright CDP** — постинг, комментирование, репосты, подписки. Требуется, потому что Binance использует client-side подписи для создания контента и DOM-based inputs для комментов.
-- **Credentials** — захватываются один раз через CDP, хранятся в SQLite, используются httpx для парсинга/лайков. Обновляются при истечении.
+After testing, the architecture evolved from pure CDP-First:
+- **httpx** — parsing (feed, articles, trends, market data), likes. Fast, no browser needed.
+- **Playwright CDP** — posting, commenting, reposts, follows. Required because Binance uses client-side signatures for content creation and DOM-based inputs for comments.
+- **Credentials** — captured once via CDP, stored in SQLite, used by httpx for parsing/likes. Refreshed on expiration.
 
 ```
-АГЕНТ (Claude / Codex / любой AI)
-  │ получает задание от человека
-  │ анализирует, генерирует контент
-  │ вызывает функции тулкита:
+AGENT (Claude / Codex / any AI)
+  │ receives task from human
+  │ analyzes, generates content
+  │ calls toolkit functions:
   │
-  ├── ПАРСИНГ (httpx + захваченные cookies)
-  │     ├── get_feed_recommend()    — рекомендованная лента
-  │     ├── get_top_articles()      — трендовые статьи
-  │     ├── get_fear_greed()        — индекс страха/жадности
-  │     ├── get_hot_hashtags()      — горячие хэштеги
-  │     └── get_market_data()       — цены монет из Binance API
+  ├── PARSING (httpx + captured cookies)
+  │     ├── get_feed_recommend()    — recommended feed
+  │     ├── get_top_articles()      — trending articles
+  │     ├── get_fear_greed()        — fear/greed index
+  │     ├── get_hot_hashtags()      — hot hashtags
+  │     └── get_market_data()       — coin prices from Binance API
   │
-  ├── ДЕЙСТВИЯ через httpx
-  │     └── like_post()             — лайк поста
+  ├── ACTIONS via httpx
+  │     └── like_post()             — like a post
   │
-  ├── ДЕЙСТВИЯ через Playwright CDP (браузер)
-  │     ├── create_post()           — пост: текст + график + sentiment + картинка
-  │     ├── create_article()        — статья: заголовок + тело + обложка
-  │     ├── repost()                — цитата/репост
-  │     ├── comment_on_post()       — коммент (обработка Follow & Reply popup)
-  │     ├── follow_author()         — подписка (проверка, подписан ли уже)
-  │     └── browse_and_interact()   — обход ленты: лайк + коммент + подписка
+  ├── ACTIONS via Playwright CDP (browser)
+  │     ├── create_post()           — post: text + chart + sentiment + image
+  │     ├── create_article()        — article: title + body + cover
+  │     ├── repost()                — quote/repost
+  │     ├── comment_on_post()       — comment (Follow & Reply popup handling)
+  │     ├── follow_author()         — follow (check if already following)
+  │     └── browse_and_interact()   — feed browsing: like + comment + follow
   │
-  ├── МЕНЕДЖЕР СЕССИЙ
-  │     ├── AdsPowerClient          — запуск/остановка профилей
-  │     ├── harvester               — захват credentials через CDP
-  │     ├── credential_store        — CRUD в SQLite для cookies/headers
-  │     └── validator               — проверка живости credentials
+  ├── SESSION MANAGER
+  │     ├── AdsPowerClient          — start/stop profiles
+  │     ├── harvester               — credential capture via CDP
+  │     ├── credential_store        — CRUD in SQLite for cookies/headers
+  │     └── validator               — credential liveness check
   │
-  ├── АККАУНТЫ
-  │     ├── manager                 — загрузка YAML-конфигов (аккаунты + персоны)
-  │     ├── limiter                 — контроль дневных лимитов
-  │     └── anti_detect             — правила изоляции аккаунтов
+  ├── ACCOUNTS
+  │     ├── manager                 — YAML config loading (accounts + personas)
+  │     ├── limiter                 — daily action limit control
+  │     └── anti_detect             — account isolation rules
   │
-  └── БД (SQLite)
+  └── DB (SQLite)
         └── credentials, actions_log, daily_stats, content_queue,
             parsed_trends, parsed_posts, discovered_endpoints
 ```
 
-## Планировщик (опционален)
+## Scheduler (optional)
 
-APScheduler может запускать циклы парсинг→генерация→публикация→engagement по расписанию. Но это опционально — агент решает когда и что запускать. Планировщик — один из возможных способов оркестрации, не обязательный компонент.
+APScheduler can run parsing→generation→publishing→engagement cycles on a schedule. But this is optional — the agent decides when and what to run. The scheduler is one possible orchestration method, not a required component.
 
-## Генерация контента
+## Content Generation
 
-Генерация контента — задача агента, не софта. Тулкит предоставляет:
-- `ContentGenerator` — инструмент для отправки промпта в AI API и получения текста. Агент решает что генерировать.
-- `CommentGenerator` — инструмент для генерации коротких комментов (использует дешёвую модель, DeepSeek по умолчанию). Агент решает к какому посту и какой контекст передать.
-- `get_market_data()` — реальные цены монет для использования в контенте.
+Content generation is the agent's task, not the software's. The toolkit provides:
+- `ContentGenerator` — a tool for sending a prompt to an AI API and receiving text. The agent decides what to generate.
+- `CommentGenerator` — a tool for generating short comments (uses a cheap model, DeepSeek by default). The agent decides which post and what context to pass.
+- `get_market_data()` — real coin prices for use in content.
 
-Правила контента определены в `config/content_rules.yaml` — агент следует им при формировании промптов.
+Content rules are defined in `config/content_rules.yaml` — the agent follows them when constructing prompts.
 
-## Проверено и работает (live-тестирование 2026-03-24)
+## Tested and Working (live testing 2026-03-24)
 
-| Действие | Метод | Статус | Заметки |
-|----------|-------|--------|---------|
-| Захват credentials | CDP | работает | 32 cookies, 13 headers |
-| Парсинг рекомендованной ленты | httpx | работает | 21 пост на страницу |
-| Парсинг топ-статей | httpx | работает | |
-| Индекс страха/жадности | httpx | работает | POST, не GET (выяснили при spike) |
-| Горячие хэштеги | httpx | работает | |
-| Рыночные данные (цены) | httpx | работает | Публичный API Binance |
-| Лайк поста | httpx | работает | `POST /bapi/composite/v1/private/pgc/content/like` |
-| Создание поста | CDP browser | работает | Текст + график + bullish/bearish |
-| Коммент к посту | CDP browser | работает | Обрабатывает "Follow & Reply" popup |
-| Подписка на автора | CDP browser | работает | Проверяет "Follow" vs "Following" |
-| Обход ленты + взаимодействие | CDP browser | работает | Скролл, фильтр, лайк+коммент+подписка |
+| Action | Method | Status | Notes |
+|--------|--------|--------|-------|
+| Credential capture | CDP | working | 32 cookies, 13 headers |
+| Recommended feed parsing | httpx | working | 21 posts per page |
+| Top articles parsing | httpx | working | |
+| Fear/greed index | httpx | working | POST, not GET (discovered during spike) |
+| Hot hashtags | httpx | working | |
+| Market data (prices) | httpx | working | Binance public API |
+| Post like | httpx | working | `POST /bapi/composite/v1/private/pgc/content/like` |
+| Post creation | CDP browser | working | Text + chart + bullish/bearish |
+| Post comment | CDP browser | working | Handles "Follow & Reply" popup |
+| Author follow | CDP browser | working | Checks "Follow" vs "Following" |
+| Feed browsing + interaction | CDP browser | working | Scroll, filter, like+comment+follow |
 
-## Ключевые технические открытия (из spike + тестирования)
+## Key Technical Discoveries (from spike + testing)
 
-1. **Feed recommend** требует `scene: "web-homepage"` и `contentIds: []` в теле POST. Данные в `data.vos`, не `data.list`.
+1. **Feed recommend** requires `scene: "web-homepage"` and `contentIds: []` in the POST body. Data is in `data.vos`, not `data.list`.
 
-2. **Fear & Greed** — это POST, не GET (спецификация была неправильной).
+2. **Fear & Greed** is a POST, not GET (specification was incorrect).
 
-3. **Эндпоинт лайка**: `POST /bapi/composite/v1/private/pgc/content/like` с телом `{"id": "<post_id>", "cardType": "BUZZ_SHORT"}`.
+3. **Like endpoint**: `POST /bapi/composite/v1/private/pgc/content/like` with body `{"id": "<post_id>", "cardType": "BUZZ_SHORT"}`.
 
-4. **Создание поста** требует client-side `nonce` + `signature` — нельзя через httpx. Только через браузер.
+4. **Post creation** requires client-side `nonce` + `signature` — cannot be done via httpx. Browser only.
 
-5. **Комменты** проходят через DOM input `input[placeholder="Post your reply"]` + кнопку Reply. Не через bapi POST.
+5. **Comments** go through the DOM input `input[placeholder="Post your reply"]` + Reply button. Not via bapi POST.
 
-6. **Автокомплит хэштегов** блокирует кнопку Post — нужно нажимать Escape после ввода хэштега.
+6. **Hashtag autocomplete** blocks the Post button — need to press Escape after entering a hashtag.
 
-7. **Две кнопки Post** на странице Square: кнопка в левой панели (открывает модальное окно) и inline-кнопка (публикует). Нужно использовать inline: `button[data-bn-type='button']:not(.news-post-button)`.
+7. **Two Post buttons** on the Square page: left panel button (opens a modal) and inline button (publishes). Must use inline: `button[data-bn-type='button']:not(.news-post-button)`.
 
-8. **Follow & Reply popup** — некоторые авторы ограничивают комменты подписчиками. Клик по "Follow & Reply" подписывает и отправляет коммент одновременно.
+8. **Follow & Reply popup** — some authors restrict comments to followers. Clicking "Follow & Reply" follows and submits the comment simultaneously.
 
-9. **Follow vs Following** — клик по кнопке "Following" ОТПИШЕТ. Нужно проверять текст кнопки перед кликом.
+9. **Follow vs Following** — clicking the "Following" button will UNFOLLOW. Must check button text before clicking.
 
-10. **Обязательные заголовки для bapi**: `csrftoken`, `bnc-uuid`, `device-info`, `fvideo-id`, `fvideo-token`, `clienttype`, `lang`, `bnc-location`, `versioncode`, `user-agent`. Без `fvideo-*` заголовков bapi возвращает `data: null`.
+10. **Required bapi headers**: `csrftoken`, `bnc-uuid`, `device-info`, `fvideo-id`, `fvideo-token`, `clienttype`, `lang`, `bnc-location`, `versioncode`, `user-agent`. Without `fvideo-*` headers, bapi returns `data: null`.
 
-## Правила контента (config/content_rules.yaml)
+## Content Rules (config/content_rules.yaml)
 
-- Язык: только английский
-- Стиль: casual, человеческий, разговорный. Без AI-клише.
-- Посты и цитаты-репосты: минимум 2 абзаца, $CASHTAGS для монет
-- Комменты: 1-2 предложения, релевантны содержанию поста, как разговор с автором
-- Цитаты-репосты: $CASHTAGS только если оригинальный пост про конкретную монету
-- Весь контент генерируется управляющим агентом через инструменты тулкита (`ContentGenerator`, `CommentGenerator`), не софтом самостоятельно
+- Language: English only
+- Style: casual, human, conversational. No AI cliches.
+- Posts and quote reposts: minimum 2 paragraphs, $CASHTAGS for coins
+- Comments: 1-2 sentences, relevant to the post content, like a conversation with the author
+- Quote reposts: $CASHTAGS only if the original post is about a specific coin
+- All content is generated by the controlling agent through toolkit tools (`ContentGenerator`, `CommentGenerator`), not by the software autonomously
 
-## База данных (SQLite + WAL mode)
+## Database (SQLite + WAL mode)
 
-7 таблиц: credentials, actions_log, daily_stats, content_queue, parsed_trends, parsed_posts, discovered_endpoints.
+7 tables: credentials, actions_log, daily_stats, content_queue, parsed_trends, parsed_posts, discovered_endpoints.
 
-YAML — источник истины для конфигов аккаунтов/персон. SQLite хранит только runtime-данные.
+YAML is the source of truth for account/persona configs. SQLite stores only runtime data.
 
-## Конфигурация
+## Configuration
 
-- `config/accounts/{id}.yaml` — инфраструктура аккаунта (adspower_profile_id, proxy, limits)
-- `config/personas.yaml` — 6 персон (стиль, темы, язык)
-- `config/settings.yaml` — глобальные настройки (интервалы, лимиты, AI-провайдер)
-- `config/content_rules.yaml` — правила генерации контента (для агента)
-- `.env` — API-ключи (ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY)
+- `config/accounts/{id}.yaml` — account infrastructure (adspower_profile_id, proxy, limits)
+- `config/personas.yaml` — 6 personas (style, topics, language)
+- `config/settings.yaml` — global settings (intervals, limits, AI provider)
+- `config/content_rules.yaml` — content generation rules (for the agent)
+- `.env` — API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY)
 
-## Известные проблемы
+## Known Issues
 
-1. **ActionLimiter** — 2 бага в логике подсчёта дневных лимитов (2 падающих теста)
-2. **ActivityExecutor** — пытается использовать httpx для комментов/репостов вместо browser_actions
-3. **Создание статей** — не протестировано live
-4. **Репост** — не протестирован live
-5. **Прикрепление картинок** — не протестировано live
-6. **Просмотр профиля автора** — не реализован
-7. **Удаление постов/комментов** — не реализовано
-8. **Мульти-профильная оркестрация** — не протестирована (пока только один профиль)
+1. **ActionLimiter** — 2 bugs in daily limit counting logic (2 failing tests)
+2. **ActivityExecutor** — tries to use httpx for comments/reposts instead of browser_actions
+3. **Article creation** — not tested live
+4. **Repost** — not tested live
+5. **Image attachment** — not tested live
+6. **Author profile viewing** — not implemented
+7. **Post/comment deletion** — not implemented
+8. **Multi-profile orchestration** — not tested (only one profile so far)
 
-## Зависимости
+## Dependencies
 
 ```
 httpx>=0.27

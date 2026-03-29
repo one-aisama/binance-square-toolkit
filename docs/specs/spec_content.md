@@ -1,31 +1,31 @@
-# Спецификация: Модуль Content
+# Specification: Content Module
 
-**Путь:** `src/content/`
-**Файлы:** `generator.py`, `publisher.py`, `market_data.py`
-
----
-
-## Описание
-
-Модуль Content предоставляет инструменты для AI-генерации текстов и управления очередью контента. Агент вызывает `ContentGenerator.generate()` для создания текста поста в стиле конкретной персоны, затем `ContentPublisher.queue_content()` для сохранения в SQLite для последующей публикации. `get_market_data()` загружает реальные цены монет с публичного API Binance, чтобы агент мог вставить конкретные числа в контент.
-
-Модуль НЕ решает, что публиковать и когда. `ContentGenerator` и `ContentPublisher` — это инструменты, которые вызывает агент. Агент анализирует вывод парсера, выбирает темы для каждой персоны и вызывает эти функции для генерации и постановки контента в очередь.
+**Path:** `src/content/`
+**Files:** `generator.py`, `publisher.py`, `market_data.py`
 
 ---
 
-## Пользовательские сценарии
+## Description
 
-- Как агент, я хочу сгенерировать текст поста в стиле конкретной персоны с реальными рыночными данными, чтобы контент каждого аккаунта соответствовал его нише и содержал конкретные числа.
-- Как агент, я хочу поставить сгенерированный контент в очередь для конкретного аккаунта с опциональным расписанием, чтобы создавать контент пакетами и публиковать позже.
-- Как агент, я хочу получить текущие цены монет (цена, изменение за 24ч, объём), чтобы включить точные данные в сгенерированный контент.
-- Как агент, я хочу получить ожидающий контент из очереди, чтобы опубликовать его через `browser_actions.create_post()`.
-- Как агент, я хочу пометить элементы очереди как опубликованные или неудачные, чтобы отслеживать жизненный цикл контента.
+The Content module provides tools for AI text generation and content queue management. The agent calls `ContentGenerator.generate()` to create post text in the style of a specific persona, then `ContentPublisher.queue_content()` to save it in SQLite for later publishing. `get_market_data()` fetches real coin prices from the Binance public API so the agent can insert specific numbers into content.
+
+The module does NOT decide what to publish and when. `ContentGenerator` and `ContentPublisher` are tools that the agent calls. The agent analyzes the parser output, selects topics for each persona, and calls these functions to generate and queue content.
 
 ---
 
-## Модель данных
+## User Stories
 
-### Таблица очереди контента (определена в `src/db/models.py`)
+- As an agent, I want to generate post text in the style of a specific persona with real market data, so each account's content matches its niche and contains specific numbers.
+- As an agent, I want to queue generated content for a specific account with optional scheduling, so I can create content in batches and publish later.
+- As an agent, I want to get current coin prices (price, 24h change, volume), so I can include accurate data in generated content.
+- As an agent, I want to fetch pending content from the queue, so I can publish it via `browser_actions.create_post()`.
+- As an agent, I want to mark queue items as published or failed, so I can track the content lifecycle.
+
+---
+
+## Data Model
+
+### Content Queue Table (defined in `src/db/models.py`)
 
 ```sql
 CREATE TABLE IF NOT EXISTS content_queue (
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS content_queue (
 );
 ```
 
-Дополнительных таблиц нет. Модуль читает/пишет только `content_queue`.
+No additional tables. The module reads/writes only `content_queue`.
 
 ---
 
@@ -57,17 +57,17 @@ class ContentGenerator:
     def __init__(self, provider: str, model: str, api_key: str)
 ```
 
-| Метод | Сигнатура | Возвращает |
-|-------|-----------|------------|
-| `generate` | `(persona_style: str, persona_topics: list[str], topic: dict, market_data: dict) -> str` | Сгенерированный текст поста |
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `generate` | `(persona_style: str, persona_topics: list[str], topic: dict, market_data: dict) -> str` | Generated post text |
 
-**Провайдеры:** `"anthropic"` (Claude API) и `"openai"` (OpenAI API). Провайдер выбирается при создании экземпляра.
+**Providers:** `"anthropic"` (Claude API) and `"openai"` (OpenAI API). Provider is selected at instantiation.
 
-**Структура промпта:**
-- Системный промпт: стиль персоны, тематические области, строгие правила написания (без AI-клише, разговорный тон, $CASHTAGS, и т.д.)
-- Пользовательский промпт: название темы + трендовые хэштеги + связанные монеты + текущие рыночные данные (цены, изменение за 24ч)
+**Prompt structure:**
+- System prompt: persona style, topic areas, strict writing rules (no AI cliches, conversational tone, $CASHTAGS, etc.)
+- User prompt: topic name + trending hashtags + related coins + current market data (prices, 24h change)
 
-Системный промпт содержит правила из `config/content_rules.yaml` inline (не загружаются из файла — правила вшиты в строку промпта).
+The system prompt contains rules from `config/content_rules.yaml` inline (not loaded from file — rules are embedded in the prompt string).
 
 ---
 
@@ -78,15 +78,15 @@ class ContentPublisher:
     def __init__(self, client: BapiClient, db_path: str)
 ```
 
-| Метод | Сигнатура | Возвращает |
-|-------|-----------|------------|
-| `publish` | `(text: str, hashtags: list[str] \| None = None) -> dict` | Вызывает `BapiClient.create_post()` — сейчас бросает `NotImplementedError` |
-| `queue_content` | `(account_id: str, text: str, hashtags: list[str] \| None, topic: str, meta: dict \| None, scheduled_at: str \| None) -> int` | ID строки очереди |
-| `get_pending` | `(account_id: str) -> list[dict]` | Ожидающие элементы где `scheduled_at <= now()` |
-| `mark_published` | `(queue_id: int, post_id: str = "") -> None` | Устанавливает status='published' |
-| `mark_failed` | `(queue_id: int, error: str) -> None` | Устанавливает status='failed' |
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `publish` | `(text: str, hashtags: list[str] \| None = None) -> dict` | Calls `BapiClient.create_post()` — currently raises `NotImplementedError` |
+| `queue_content` | `(account_id: str, text: str, hashtags: list[str] \| None, topic: str, meta: dict \| None, scheduled_at: str \| None) -> int` | Queue row ID |
+| `get_pending` | `(account_id: str) -> list[dict]` | Pending items where `scheduled_at <= now()` |
+| `mark_published` | `(queue_id: int, post_id: str = "") -> None` | Sets status='published' |
+| `mark_failed` | `(queue_id: int, error: str) -> None` | Sets status='failed' |
 
-**Примечание:** `publish()` — это stub. Фактическая публикация идёт через `session.browser_actions.create_post()`, потому что Binance требует клиентский nonce + signature. Publisher управляет только очередью.
+**Note:** `publish()` is a stub. Actual publishing goes through `session.browser_actions.create_post()` because Binance requires a client-side nonce + signature. The publisher manages only the queue.
 
 ---
 
@@ -96,9 +96,9 @@ class ContentPublisher:
 async def get_market_data(symbols: list[str]) -> dict[str, dict[str, Any]]
 ```
 
-Загружает данные тикера за 24ч с публичного API Binance (`https://api.binance.com/api/v3/ticker/24hr`) для каждого символа (например, `["BTC", "ETH"]`). Добавляет `USDT` к каждому символу для API-вызова.
+Fetches 24h ticker data from the Binance public API (`https://api.binance.com/api/v3/ticker/24hr`) for each symbol (e.g., `["BTC", "ETH"]`). Appends `USDT` to each symbol for the API call.
 
-**Возвращает:**
+**Returns:**
 ```python
 {
     "BTC": {"price": 67500.0, "change_24h": 2.3, "volume": 15000.0},
@@ -106,59 +106,59 @@ async def get_market_data(symbols: list[str]) -> dict[str, dict[str, Any]]
 }
 ```
 
-Загружает все символы параллельно через `asyncio.gather()`. Неудачные загрузки логируются и исключаются из результатов.
+Fetches all symbols in parallel via `asyncio.gather()`. Failed fetches are logged and excluded from results.
 
 ---
 
-## Бизнес-логика
+## Business Logic
 
-### Пайплайн генерации контента (управляется агентом)
+### Content Generation Pipeline (controlled by agent)
 ```
-Агент решает создать пост для аккаунта X
-  -> Агент выбирает тему из вывода парсера
-  -> Агент вызывает get_market_data(coins) для реальных цен
-  -> Агент вызывает ContentGenerator.generate(style, topics, topic, market_data)
-  -> Агент вызывает ContentPublisher.queue_content(account_id, text, ...)
-  -> Агент вызывает ContentPublisher.get_pending(account_id)
-  -> Агент вызывает browser_actions.create_post(ws, text, coin, sentiment)
-  -> Агент вызывает ContentPublisher.mark_published(queue_id, post_id)
+Agent decides to create a post for account X
+  -> Agent selects topic from parser output
+  -> Agent calls get_market_data(coins) for real prices
+  -> Agent calls ContentGenerator.generate(style, topics, topic, market_data)
+  -> Agent calls ContentPublisher.queue_content(account_id, text, ...)
+  -> Agent calls ContentPublisher.get_pending(account_id)
+  -> Agent calls browser_actions.create_post(ws, text, coin, sentiment)
+  -> Agent calls ContentPublisher.mark_published(queue_id, post_id)
 ```
 
-### Построение промпта
-Системный промпт включает:
-- Стиль и темы персоны
-- Правила написания (разговорный стиль, без AI-клише, $CASHTAGS, конкретные числа)
-- Список запрещённых фраз (17 фраз)
-- Хорошие и плохие примеры
-- Рекомендации по длине: 100-280 символов для коротких заметок, до 1000 для аналитики
+### Prompt Construction
+System prompt includes:
+- Persona style and topics
+- Writing rules (conversational style, no AI cliches, $CASHTAGS, specific numbers)
+- Banned phrases list (17 phrases)
+- Good and bad examples
+- Length guidelines: 100-280 characters for short notes, up to 1000 for analysis
 
-Пользовательский промпт включает:
-- Название темы
-- До 5 трендовых хэштегов (с префиксом #)
-- До 5 связанных монет (с префиксом $)
-- Текущие рыночные данные в формате `$COIN: $price (+/-change% 24h)`
+User prompt includes:
+- Topic name
+- Up to 5 trending hashtags (with # prefix)
+- Up to 5 related coins (with $ prefix)
+- Current market data in format `$COIN: $price (+/-change% 24h)`
 
-### Расписание очереди
-Элементы с `scheduled_at = NULL` сразу доступны для публикации. Элементы с будущим `scheduled_at` становятся доступными после наступления времени. `get_pending()` проверяет `scheduled_at <= utcnow()`.
-
----
-
-## Крайние случаи
-
-| Ситуация | Ожидаемое поведение |
-|----------|---------------------|
-| AI API возвращает пустой ответ | `generate()` возвращает пустую строку — агент должен проверить и повторить или пропустить |
-| AI API rate limited или недоступен | Исключение пробрасывается вызывающему коду (агент управляет логикой retry) |
-| `market_data` — пустой dict | Пользовательский промпт пропускает секцию рынка — AI генерирует без конкретных цен |
-| Символ не найден на Binance | `_fetch_ticker` бросает исключение, логируется как warning, символ исключается из результатов |
-| В очереди нет ожидающих элементов | `get_pending()` возвращает пустой список |
-| Вызван `publish()` | Бросает `NotImplementedError` — используйте `browser_actions.create_post()` |
-| Дублирующийся контент в очереди | Дедупликации нет — один и тот же текст можно поставить в очередь несколько раз |
+### Queue Scheduling
+Items with `scheduled_at = NULL` are immediately available for publishing. Items with a future `scheduled_at` become available after the time arrives. `get_pending()` checks `scheduled_at <= utcnow()`.
 
 ---
 
-## Приоритет и зависимости
+## Edge Cases
 
-- **Приоритет:** Высокий
-- **Зависит от:** `src/bapi/client.py` (ContentPublisher хранит ссылку на BapiClient, хотя publish — stub), `src/db/` (таблица content_queue)
-- **Блокирует:** Пайплайн публикации в планировщике (контент должен быть сгенерирован прежде чем его можно опубликовать)
+| Situation | Expected Behavior |
+|-----------|-------------------|
+| AI API returns empty response | `generate()` returns empty string — agent should check and retry or skip |
+| AI API rate limited or unavailable | Exception propagated to caller (agent manages retry logic) |
+| `market_data` is empty dict | User prompt skips market section — AI generates without specific prices |
+| Symbol not found on Binance | `_fetch_ticker` raises exception, logged as warning, symbol excluded from results |
+| No pending items in queue | `get_pending()` returns empty list |
+| `publish()` called | Raises `NotImplementedError` — use `browser_actions.create_post()` |
+| Duplicate content in queue | No deduplication — the same text can be queued multiple times |
+
+---
+
+## Priority and Dependencies
+
+- **Priority:** High
+- **Depends on:** `src/bapi/client.py` (ContentPublisher holds a reference to BapiClient, though publish is a stub), `src/db/` (content_queue table)
+- **Blocks:** Publishing pipeline in scheduler (content must be generated before it can be published)
