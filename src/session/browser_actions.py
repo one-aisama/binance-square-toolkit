@@ -692,10 +692,10 @@ async def collect_feed_posts(
     *,
     page=None,
 ) -> list[dict[str, Any]]:
-    """Collect posts from Binance Square feed without interacting.
+    """Collect posts from Binance Square feed in ONE pass from DOM.
 
-    Navigates to feed, scrolls to load posts, visits each post to extract
-    clean text and metadata. Returns list of posts for agent to decide on.
+    No navigation to individual posts — everything parsed from the feed page.
+    Fast: scrolls feed, extracts post_id + author + text + likes from cards.
 
     Args:
         ws_endpoint: WebSocket endpoint from AdsPower
@@ -706,7 +706,6 @@ async def collect_feed_posts(
         List of dicts: {post_id, author, text, like_count}
     """
     pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
-    results: list[dict[str, Any]] = []
 
     try:
         logger.info("Collecting feed posts...")
@@ -727,60 +726,65 @@ async def collect_feed_posts(
             await page.mouse.wheel(0, 800)
             await asyncio.sleep(2)
 
-        # Collect post IDs from feed links
-        post_links = await page.query_selector_all("a[href*='/square/post/']")
-        post_ids: list[str] = []
-        seen: set[str] = set()
-        for link in post_links:
-            href = await link.get_attribute("href") or ""
-            parts = href.rstrip("/").split("/")
-            if parts and parts[-1].isdigit():
-                pid = parts[-1]
-                if pid not in seen:
-                    seen.add(pid)
-                    post_ids.append(pid)
+        # Parse all posts from DOM in ONE JS pass — no navigation
+        results = await page.evaluate(r'''(maxCount) => {
+            const cards = document.querySelectorAll('.feed-buzz-card-base-view');
+            const posts = [];
+            const seen = new Set();
 
-        logger.info(f"Found {len(post_ids)} unique posts in feed")
+            for (const card of cards) {
+                if (posts.length >= maxCount) break;
 
-        # Visit each post, extract text and metadata
-        for pid in post_ids:
-            if len(results) >= count:
-                break
+                // Get post_id from link
+                const link = card.querySelector('a[href*="/square/post/"]');
+                if (!link) continue;
+                const href = link.getAttribute('href') || '';
+                const match = href.match(/\/post\/(\d+)/);
+                if (!match) continue;
+                const postId = match[1];
+                if (seen.has(postId)) continue;
+                seen.add(postId);
 
-            post_url = page_map.POST_URL_TEMPLATE.format(post_id=pid)
-            await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
-            await asyncio.sleep(4)
+                // Get author
+                const nickEl = card.querySelector('.nick-username a.nick');
+                const author = nickEl ? nickEl.textContent.trim() : 'Unknown';
 
-            text = await _extract_post_text(page)
-            author = await _extract_author_name(page)
+                // Get text from card body
+                const bodyEl = card.querySelector('.card__bd');
+                const text = bodyEl ? bodyEl.innerText.trim() : '';
+                if (text.length < 30) continue;
 
-            # Skip empty posts
-            if len(text.strip()) < 30:
-                continue
+                // Get like count
+                const likeEl = card.querySelector('.thumb-up-button');
+                let likeCount = 0;
+                if (likeEl) {
+                    const likeText = likeEl.innerText.trim();
+                    const num = likeText.replace(/[^0-9.kKmM]/g, '');
+                    if (num.toLowerCase().includes('k')) {
+                        likeCount = Math.round(parseFloat(num) * 1000);
+                    } else if (num.toLowerCase().includes('m')) {
+                        likeCount = Math.round(parseFloat(num) * 1000000);
+                    } else {
+                        likeCount = parseInt(num) || 0;
+                    }
+                }
 
-            # Get like count
-            like_count = 0
-            try:
-                like_el = page.locator(page_map.POST_LIKE_BUTTON).first
-                like_text = await like_el.text_content() or "0"
-                like_count = int("".join(c for c in like_text if c.isdigit()) or "0")
-            except Exception:
-                pass
+                posts.push({
+                    post_id: postId,
+                    author: author,
+                    text: text.substring(0, 1000),
+                    like_count: likeCount,
+                });
+            }
+            return posts;
+        }''', count)
 
-            results.append({
-                "post_id": pid,
-                "author": author,
-                "text": text[:1000],
-                "like_count": like_count,
-            })
-            logger.info(f"Collected post {pid} by {author} ({len(text)} chars)")
-
-        logger.info(f"Collected {len(results)} posts total")
+        logger.info(f"Collected {len(results)} posts from feed (DOM parse, no navigation)")
         return results
 
     except Exception as e:
         logger.error(f"Feed collection failed: {e}")
-        return results
+        return []
     finally:
         if _cleanup and pw:
                 await pw.stop()
