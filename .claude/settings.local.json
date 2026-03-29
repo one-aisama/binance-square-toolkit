@@ -78,7 +78,21 @@
       "Bash(timeout 30)",
       "Bash(python -m pytest tests/test_content_validator.py -v)",
       "Bash(python -m pytest tests/ -v --ignore=tests/test_harvester_integration.py --tb=short)",
-      "Bash(python -m pytest tests/test_content_validator.py -v --tb=short)"
+      "Bash(python -m pytest tests/test_content_validator.py -v --tb=short)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(python -m pytest tests/test_runtime_guard.py -v)",
+      "Bash(python -m pytest tests/test_runtime_guard.py tests/test_accounts.py -v)",
+      "Bash(python scripts/test_session_v2.py)",
+      "Bash(tasklist)",
+      "Bash(wmic process:*)",
+      "Bash(curl -s http://localhost:50325/api/v1/browser/active)",
+      "Bash(curl -s \"http://localhost:50325/api/v1/browser/active?serial_number=1\")",
+      "Bash(python src/:*)",
+      "Bash(python scripts/:*)",
+      "Bash(python -c :*)",
+      "Bash(python -X utf8:*)",
+      "Bash(python -m pytest:*)"
     ]
   }
 }
