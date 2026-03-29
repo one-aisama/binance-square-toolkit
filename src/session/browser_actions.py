@@ -969,12 +969,11 @@ async def get_my_comment_replies(
 ) -> list[dict[str, Any]]:
     """Find replies to agent's comments by checking the profile Replies tab.
 
-    Flow:
+    Rewritten flow (no back-and-forth navigation):
     1. Navigate to profile → Replies tab
-    2. Scroll to load reply cards
-    3. Find agent's cards where comment count > 0 (someone replied)
-    4. For each (up to max_replies), click the card to navigate to the comment page
-    5. Read the replies there
+    2. ONE JS pass: collect post_ids + comment text for cards with replies
+    3. For each post_id, navigate directly by URL and read replies
+    No returning to profile between cards.
 
     Args:
         ws_endpoint: CDP websocket endpoint
@@ -982,7 +981,7 @@ async def get_my_comment_replies(
         max_replies: Maximum number of reply cards to process (default 5)
 
     Returns:
-        [{comment_text, comment_post_id, replies: [{author, author_handle, text}]}]
+        [{comment_text, comment_post_id, reply_count, replies: [{author, author_handle, text}]}]
     """
     pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
@@ -996,18 +995,18 @@ async def get_my_comment_replies(
         await replies_tab.click()
         await asyncio.sleep(4)
 
-        # Scroll to load (limited — don't load entire history)
+        # Scroll to load (limited)
         for _ in range(2):
             await page.evaluate("window.scrollBy(0, 700)")
             await asyncio.sleep(2)
 
-        # Find our reply cards with comment count > 0
-        cards_with_replies = await page.evaluate(r'''(username) => {
+        # ONE pass: collect post_ids from card links + comment count
+        # Each reply card has a link to the post. Extract it from href.
+        cards_data = await page.evaluate(r'''(username) => {
             const cards = document.querySelectorAll('.feed-buzz-card-base-view');
             const results = [];
 
-            for (let i = 0; i < cards.length; i++) {
-                const card = cards[i];
+            for (const card of cards) {
                 const nickEl = card.querySelector('.nick-username a.nick');
                 if (!nickEl) continue;
                 const author = nickEl.textContent.trim();
@@ -1019,14 +1018,19 @@ async def get_my_comment_replies(
                 const count = parseInt(countText) || 0;
                 if (count === 0) continue;
 
+                // Get post_id from card link
+                const link = card.querySelector('a[href*="/square/post/"]');
+                if (!link) continue;
+                const href = link.getAttribute('href') || '';
+                const match = href.match(/\/post\/(\d+)/);
+                if (!match) continue;
+
                 // Get our comment text
                 const bodyEl = card.querySelector('.card__bd');
-                const text = bodyEl
-                    ? bodyEl.innerText.trim().substring(0, 200)
-                    : '';
+                const text = bodyEl ? bodyEl.innerText.trim().substring(0, 200) : '';
 
                 results.push({
-                    index: i,
+                    post_id: match[1],
                     comment_text: text,
                     reply_count: count,
                 });
@@ -1034,51 +1038,26 @@ async def get_my_comment_replies(
             return results;
         }''', username)
 
-        logger.info(
-            f"get_my_comment_replies: {len(cards_with_replies)} comments have replies"
-        )
+        logger.info(f"get_my_comment_replies: found {len(cards_data)} comments with replies")
 
-        if not cards_with_replies:
+        if not cards_data:
             return []
 
-        # For each card with replies, click it to navigate to the comment page
-        # and read the replies there
+        # Now visit each post directly by URL (no returning to profile)
         results = []
-
-        for card_info in cards_with_replies[:max_replies]:
-            idx = card_info["index"]
+        for card in cards_data[:max_replies]:
+            post_id = card["post_id"]
             try:
-                # Re-navigate to profile Replies tab (page may have changed)
-                if "profile" not in page.url:
-                    await page.goto(profile_url, wait_until="domcontentloaded", timeout=60_000)
-                    await asyncio.sleep(4)
-                    await page.locator("div.category:has-text('Replies')").first.click()
-                    await asyncio.sleep(3)
-                    for _ in range(4):
-                        await page.evaluate("window.scrollBy(0, 700)")
-                        await asyncio.sleep(1.5)
-
-                # Click the card body to navigate to comment page
-                all_cards = await page.locator(".feed-buzz-card-base-view").all()
-                if idx >= len(all_cards):
-                    continue
-
-                card = all_cards[idx]
-                body_el = card.locator(".card__bd").first
-                await body_el.click()
-                await asyncio.sleep(5)
-
-                # Extract post_id from URL
-                current_url = page.url
-                post_id_match = re.search(r"/post/(\d+)", current_url)
-                comment_post_id = post_id_match.group(1) if post_id_match else ""
+                url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
+                await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+                await asyncio.sleep(4)
 
                 # Scroll to load replies
-                for _ in range(3):
+                for _ in range(2):
                     await page.evaluate("window.scrollBy(0, 500)")
                     await asyncio.sleep(1.5)
 
-                # Read reply cards (skip first card which is our comment)
+                # Read reply cards (skip first card = our comment)
                 replies = await page.evaluate(r'''() => {
                     const cards = document.querySelectorAll('.feed-buzz-card-base-view');
                     const results = [];
@@ -1107,19 +1086,19 @@ async def get_my_comment_replies(
                 }''')
 
                 results.append({
-                    "comment_text": card_info["comment_text"],
-                    "comment_post_id": comment_post_id,
-                    "reply_count": card_info["reply_count"],
+                    "comment_text": card["comment_text"],
+                    "comment_post_id": post_id,
+                    "reply_count": card["reply_count"],
                     "replies": replies,
                 })
 
                 logger.info(
-                    f"Comment '{card_info['comment_text'][:40]}...' has "
-                    f"{len(replies)} replies at post {comment_post_id}"
+                    f"Comment '{card['comment_text'][:40]}...' has "
+                    f"{len(replies)} replies at post {post_id}"
                 )
 
             except Exception as e:
-                logger.error(f"get_my_comment_replies: error reading replies for card {idx}: {e}")
+                logger.error(f"get_my_comment_replies: error on post {post_id}: {e}")
                 continue
 
         return results
