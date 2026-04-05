@@ -1,0 +1,29 @@
+active_agent:
+  agent_id: "my_agent"
+  binance_username: "MyBinanceUsername"
+  profile_serial: "1"                    # AdsPower profile number
+  adspower_user_id: "your_adspower_id"   # From AdsPower profile settings
+  persona_id: "my_agent"
+  agent_dir: "agents/my_agent"
+  account_config_path: "config/accounts/my_agent.yaml"
+  primary_feed_tab: "recommended"
+  max_session_actions: 80
+  session_minimum:
+    like: 20
+    comment: 20
+    post: 3
+  market_symbols: ["BTC", "ETH", "SOL", "BNB", "XRP"]
+  ta_requests:
+    - symbol: "BTC"
+      timeframe: "1D"
+    - symbol: "ETH"
+      timeframe: "4H"
+  visual:
+    enabled: true
+    provider: "chatgpt_web"
+    provider_url: "https://chatgpt.com/"
+    output_dir: "data/generated_visuals"
+    prompt_timeout_sec: 180
+  cycle_interval_minutes: [10, 15]
+  daily_plan_timezone: "UTC"
+  mode: "standard"

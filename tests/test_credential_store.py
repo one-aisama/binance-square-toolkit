@@ -1,3 +1,4 @@
+import aiosqlite
 import pytest
 from src.db.database import init_db
 from src.session.credential_store import CredentialStore
@@ -63,3 +64,41 @@ async def test_upsert_revalidates(store):
     # Re-save should re-validate
     await store.save("acc", {"c": 3}, {"d": 4})
     assert await store.is_valid("acc") is True
+
+
+async def test_save_encrypts_values_at_rest(store):
+    await store.save("acc", {"session": "abc123"}, {"csrftoken": "xyz"})
+
+    async with aiosqlite.connect(store._db_path) as db:
+        cursor = await db.execute(
+            "SELECT cookies, headers FROM credentials WHERE account_id = ?",
+            ("acc",),
+        )
+        row = await cursor.fetchone()
+
+    assert row is not None
+    assert row[0].startswith("dpapi:")
+    assert row[1].startswith("dpapi:")
+
+
+async def test_load_supports_legacy_plaintext_values(store):
+    async with aiosqlite.connect(store._db_path) as db:
+        await db.execute(
+            """INSERT INTO credentials (account_id, cookies, headers, harvested_at, expires_at, valid)
+               VALUES (?, ?, ?, ?, ?, TRUE)""",
+            (
+                "legacy",
+                '{"session": "legacy_cookie"}',
+                '{"csrftoken": "legacy_header"}',
+                "2026-03-31T00:00:00",
+                "2026-04-01T00:00:00",
+            ),
+        )
+        await db.commit()
+
+    cred = await store.load("legacy")
+
+    assert cred is not None
+    assert cred["cookies"] == {"session": "legacy_cookie"}
+    assert cred["headers"] == {"csrftoken": "legacy_header"}
+

@@ -82,20 +82,18 @@ class SessionPlanner:
         lessons = _read_file(str(Path(self._agent_dir) / "lessons.md"))
         relationships = _read_file(str(Path(self._agent_dir) / "relationships.md"))
 
-        # Format feed posts as readable list
         feed_lines = []
         for p in filtered_feed[:20]:
             preview = (p.get("text") or "")[:120].replace("\n", " ")
+            fit = p.get("selection_reason") or "general"
             feed_lines.append(
                 f"- post_id={p.get('post_id')}, author={p.get('author')}, "
-                f"likes={p.get('like_count', 0)}, text: {preview}"
+                f"likes={p.get('like_count', 0)}, fit={fit}, text: {preview}"
             )
         feed_str = "\n".join(feed_lines) if feed_lines else "(empty feed)"
 
-        # Format market data
         market_str = json.dumps(market_data, indent=2) if market_data else "(no data)"
 
-        # Format news
         news_lines = []
         for n in (news or [])[:10]:
             title = n.get("title") or n.get("headline") or str(n)
@@ -114,7 +112,7 @@ class SessionPlanner:
             "## Relationships",
             relationships if relationships else "(no relationships yet)",
             "",
-            "## Available Feed Posts (pre-filtered, all quality)",
+            "## Available Feed Posts (already prioritized for this agent)",
             feed_str,
             "",
             "## Market Data",
@@ -131,14 +129,20 @@ class SessionPlanner:
             '- "priority": 1-5 (1 = highest)',
             '- "reason": why this action',
             '- "fallback": alternative action if this fails, or null',
-            '- "content_hint": brief idea for post/comment text, or null',
-            '- "image_type": "chart" | "meme" | null',
+            '- "text": final agent-authored wording for post/comment/quote_repost, or null for like/follow',
+            '- "coin": optional Binance chart-card ticker like BTC for post actions',
+            '- "chart_symbol": optional trading pair like BTC_USDT, only when chart_image=true',
+            '- "chart_image": optional boolean, true only when you explicitly want a custom screenshot instead of a chart card',
+            '- "image_path": optional local image path for a custom visual; never combine it with coin',
             "",
             "## Guidelines",
-            "- Minimum: 1 post + 2 comments + 3 likes",
+            "- Respect the minimum contract shown in the live session context",
             "- Each comment must target a specific post_id from the feed",
-            "- Post should have a content_hint with topic and angle",
-            "- Like posts you comment on + a few others",
+            "- Post/comment/quote actions must include final text written by the agent",
+            "- Prefer coin chart cards for routine market takes; use chart_image only when the pair/timeframe itself matters",
+            "- Never combine coin with chart_image or image_path in one post",
+            "- Avoid repetitive visuals across consecutive posts, especially the same pair and timeframe",
+            "- Scripts may execute the plan, but must never draft the wording for you",
             "- Order by priority (1 = highest)",
         ]
 
@@ -262,3 +266,4 @@ class SessionPlanner:
 
         valid.sort(key=lambda a: a.get("priority", 99))
         return valid
+

@@ -163,7 +163,7 @@ class StrategyAnalyst:
             "- Never two posts of same type in a row\n"
             "- Never three comments on same author in one session\n"
             "- Vary session times (morning, afternoon, evening)\n"
-            "- Minimum per session: 1 post + 2 comments + 3 likes\n\n"
+            "- Minimum per session: 3 posts + 20 comments + 20 likes\n\n"
             "## Content Mix\n"
             "- Market analysis with chart: 40%\n"
             "- Hot takes on news: 30%\n"

@@ -1,12 +1,15 @@
-account_id: example_account
-persona_id: defi_analyst
-binance_uid: "123456"
-adspower_profile_id: "abc123"
+# Account config example
+# Copy this file as {agent_id}.yaml and fill in your values
+
+account_id: "my_agent"
+adspower_profile_id: "your_profile_id"
 proxy:
-  host: xxx.iproxy.online
-  port: 30001
-limits:
-  posts_per_day: [3, 5]
-  likes_per_day: [30, 60]
-  comments_per_day: [12, 24]
-  min_interval_sec: 90
+  host: ""
+  port: 0
+  username: ""
+  password: ""
+daily_limits:
+  likes: [20, 40]
+  comments: [20, 30]
+  posts: [3, 5]
+  reposts: [0, 2]

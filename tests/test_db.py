@@ -17,10 +17,11 @@ async def test_init_db_creates_tables(tmp_path):
     assert "credentials" in tables
     assert "actions_log" in tables
     assert "daily_stats" in tables
-    assert "content_queue" in tables
     assert "parsed_trends" in tables
     assert "parsed_posts" in tables
     assert "discovered_endpoints" in tables
+    assert "post_tracker" in tables
+    assert "topic_reservations" in tables
 
 
 async def test_init_db_enables_wal(tmp_path):
@@ -45,7 +46,7 @@ async def test_init_db_idempotent(tmp_path):
         )
         count = (await cursor.fetchone())[0]
 
-    assert count == 8
+    assert count == 10
 
 
 async def test_init_db_creates_indexes(tmp_path):
@@ -59,6 +60,6 @@ async def test_init_db_creates_indexes(tmp_path):
         indexes = [row[0] for row in await cursor.fetchall()]
 
     assert "idx_actions_account_type_time" in indexes
-    assert "idx_content_queue_status" in indexes
-    assert "idx_content_queue_schedule" in indexes
     assert "idx_parsed_posts_cycle" in indexes
+    assert "idx_post_tracker_account" in indexes
+    assert "idx_reservations_active" in indexes

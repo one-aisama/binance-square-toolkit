@@ -57,6 +57,10 @@ BAD_COMMENT_PATTERNS = [
 
 # Similarity threshold for duplicate detection (0.0 - 1.0)
 DUPLICATE_THRESHOLD = 0.65
+RECENT_TOPIC_WINDOW = 3
+TA_KEYWORDS = {"rsi", "macd", "support", "resistance", "ma20", "ma50", "ma200", "daily chart", "4h", "1d", "chart", "levels"}
+NEWS_KEYWORDS = {"roadmap", "news", "headline", "law", "regulation", "announced", "builders", "project", "act", "report", "fragmentation"}
+META_KEYWORDS = {"people", "market", "process", "attention", "feed", "traders", "everyone", "conviction"}
 
 
 @dataclass
@@ -108,11 +112,15 @@ def validate_post(text: str, recent_posts: list[str] | None = None) -> Validatio
     if not re.search(r"\$[A-Z]{2,10}", text):
         warnings.append("No $CASHTAG found — post won't appear in coin-specific feeds")
 
-    # Duplicate check
+    # Duplicate and sequencing checks
     if recent_posts:
         dup = _check_duplicates(text, recent_posts)
         if dup:
             errors.append(f"Too similar to a recent post (similarity: {dup:.0%})")
+
+        topic_repeat = _check_topic_repeat(text, recent_posts)
+        if topic_repeat:
+            errors.append(topic_repeat)
 
     valid = len(errors) == 0
     if not valid:
@@ -274,6 +282,50 @@ def _check_duplicates(text: str, recent_posts: list[str]) -> float | None:
     return None
 
 
+def _check_topic_repeat(text: str, recent_posts: list[str]) -> str | None:
+    """Block consecutive posts with the same dominant coin and angle."""
+    current_signature = _build_topic_signature(text)
+    if current_signature is None:
+        return None
+
+    for post in recent_posts[:RECENT_TOPIC_WINDOW]:
+        recent_signature = _build_topic_signature(post)
+        if recent_signature != current_signature:
+            break
+
+        coin, angle = current_signature
+        return f"Latest profile post already uses the same topic pattern ({coin}, {angle})"
+
+    return None
+
+
+def _build_topic_signature(text: str) -> tuple[str, str] | None:
+    """Infer a coarse topic fingerprint from coin + post angle."""
+    primary_coin = _extract_primary_coin(text)
+    angle = _infer_post_angle(text)
+    if primary_coin and angle != "general":
+        return primary_coin, angle
+    return None
+
+
+def _extract_primary_coin(text: str) -> str | None:
+    match = re.search(r"\$([A-Z]{2,10})", text, re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1).upper()
+
+
+def _infer_post_angle(text: str) -> str:
+    lowered = text.lower()
+    if any(keyword in lowered for keyword in TA_KEYWORDS):
+        return "ta"
+    if any(keyword in lowered for keyword in NEWS_KEYWORDS):
+        return "news"
+    if any(keyword in lowered for keyword in META_KEYWORDS):
+        return "meta"
+    return "general"
+
+
 def _normalize_for_comparison(text: str) -> str:
     """Normalize text for duplicate comparison.
 
@@ -337,3 +389,4 @@ def verify_prices(text: str, market_data: dict[str, dict]) -> list[str]:
                         f"(actual: ${actual_price:,.2f}, deviation: {deviation:.0%})"
                     )
     return warnings
+

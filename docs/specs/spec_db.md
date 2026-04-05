@@ -1,63 +1,75 @@
-# Specification: db
-# Module: src/db/
-# Status: implemented
+# Спецификация: db
+# Модуль: src/db/
+# Статус: реализован
 
-## Purpose
-SQLite storage for runtime data: credentials, actions, content queue, parsing.
-YAML is the source of truth for configs. SQLite is runtime only.
+## Назначение
+SQLite хранилище runtime-данных: credentials, действия, очередь контента, парсинг.
+YAML — источник истины для конфигов. SQLite — только runtime.
 
-## Files
-| File | What it does |
+## Файлы
+| Файл | Что делает |
 |------|------------|
-| database.py | `init_db(db_path)` — idempotent table creation, WAL mode; `get_db_path()` from env |
-| models.py | `SCHEMA_SQL` — DDL for all 7 tables |
+| database.py | `init_db(db_path)` — идемпотентное создание таблиц, WAL mode; `get_db_path()` из env |
+| models.py | `SCHEMA_SQL` — DDL для всех 9 таблиц |
 
-## Tables
+## Таблицы
 
 ### credentials
-Cookies + headers from authorized sessions.
-- `account_id` TEXT PK — account identifier
-- `cookies` TEXT — JSON cookies from CDP
+Cookies + headers авторизованных сессий.
+- `account_id` TEXT PK — идентификатор аккаунта
+- `cookies` TEXT — JSON cookies из CDP
 - `headers` TEXT — JSON headers (csrftoken, fvideo-id, fvideo-token)
-- `harvested_at` TIMESTAMP — when captured
-- `expires_at` TIMESTAMP — when they expire
-- `valid` BOOLEAN — validity flag
+- `harvested_at` TIMESTAMP — когда захвачены
+- `expires_at` TIMESTAMP — когда протухнут
+- `valid` BOOLEAN — флаг валидности
 
 ### actions_log
-Every action (like, comment, repost, post) with status.
+Каждое действие (like, comment, repost, post) со статусом.
 - `account_id`, `action_type`, `target_id`, `status`, `error_message`, `created_at`
-- Index: `(account_id, action_type, created_at)` — for limit counting
+- Индекс: `(account_id, action_type, created_at)` — для подсчёта лимитов
 
 ### daily_stats
-Aggregated counters per account per day.
+Агрегированные счётчики по аккаунту в день.
 - `account_id`, `date`, `posts_count`, `likes_count`, `comments_count`, `reposts_count`, `errors_count`
 - UNIQUE: `(account_id, date)`
 
 ### content_queue
-Generated posts awaiting publication.
+Сгенерированные посты ожидающие публикации.
 - `account_id`, `text`, `hashtags`, `topic`, `generation_meta`, `status`, `scheduled_at`, `published_at`, `post_id`
-- Indexes: `(account_id, status)`, `(status, scheduled_at)`
+- Индексы: `(account_id, status)`, `(status, scheduled_at)`
 
 ### parsed_trends
-Snapshot of topics + fear/greed per parsing cycle.
+Снапшот тем + fear/greed за цикл парсинга.
 - `cycle_id`, `topics` (JSON), `fear_greed_index`, `popular_coins`
 
 ### parsed_posts
-Raw parsed posts for deduplication.
-- `cycle_id`, `post_id`, `author_name`, `card_type`, metrics (views, likes, comments, shares), `hashtags`, `trading_pairs`, `is_ai_created`
+Сырые распарсенные посты для дедупликации.
+- `cycle_id`, `post_id`, `author_name`, `card_type`, метрики (views, likes, comments, shares), `hashtags`, `trading_pairs`, `is_ai_created`
 - UNIQUE: `(cycle_id, post_id)`
 
 ### discovered_endpoints
-CDP-discovered bapi endpoints with request/response examples.
+CDP-обнаруженные bapi endpoints с примерами запросов/ответов.
 - `method`, `path`, `purpose`, `request_headers`, `request_body`, `response_sample`
 - UNIQUE: `(method, path)`
 
-## Rules
-- WAL mode is mandatory
-- All queries are parameterized — no f-strings in SQL
-- `aiosqlite` for all operations (async)
-- New table: add DDL to `SCHEMA_SQL`, call `init_db` (idempotent)
-- DB path: `DB_PATH` variable, defaults to `data/bsq.db`
+## Правила
+- WAL mode обязателен
+- Все запросы параметризованные — никаких f-строк в SQL
+- `aiosqlite` для всех операций (async)
+- Новая таблица: добавить DDL в `SCHEMA_SQL`, вызвать `init_db` (идемпотентно)
+- Путь к БД: переменная `DB_PATH`, по умолчанию `data/bsq.db`
 
-## Known Limitations
-- No migration system — changes via ALTER TABLE or DB recreation
+### post_tracker
+Трекинг всех постов всех агентов с метриками вовлечённости.
+- `id` INTEGER PK, `agent_id`, `post_id`, `post_type` (post/article/quote_repost), `text`, `coin`, `angle`
+- `created_at`, `views`, `likes`, `comments`, `quotes`
+- Индекс: `(agent_id, created_at)`
+
+### topic_reservations
+Кросс-агентная блокировка тем для предотвращения дубликатов.
+- `agent_id` TEXT, `reservation_key` TEXT UNIQUE, `created_at` TIMESTAMP, `expires_at` TIMESTAMP
+- Key формат: `{COIN}:{angle}:{md5(source)[:8]}`
+- TTL: 2 часа. Expired записи чистятся через `cleanup_expired()`
+
+## Известные ограничения
+- Нет системы миграций — изменения через ALTER TABLE или пересоздание БД

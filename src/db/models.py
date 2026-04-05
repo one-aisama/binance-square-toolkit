@@ -31,22 +31,6 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     UNIQUE(account_id, date)
 );
 
-CREATE TABLE IF NOT EXISTS content_queue (
-    id INTEGER PRIMARY KEY,
-    account_id TEXT NOT NULL,
-    text TEXT NOT NULL,
-    hashtags TEXT,
-    topic TEXT,
-    generation_meta TEXT,
-    status TEXT DEFAULT 'pending',
-    error_message TEXT,
-    scheduled_at TIMESTAMP,
-    published_at TIMESTAMP,
-    post_id TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_content_queue_status ON content_queue(account_id, status);
-CREATE INDEX IF NOT EXISTS idx_content_queue_schedule ON content_queue(status, scheduled_at);
 
 CREATE TABLE IF NOT EXISTS parsed_trends (
     id INTEGER PRIMARY KEY,
@@ -102,4 +86,37 @@ CREATE TABLE IF NOT EXISTS post_tracker (
     notes TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_post_tracker_account ON post_tracker(account_id, created_at);
+
+CREATE TABLE IF NOT EXISTS topic_reservations (
+    id INTEGER PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    reservation_key TEXT NOT NULL UNIQUE,
+    post_family TEXT NOT NULL,
+    primary_coin TEXT,
+    angle TEXT,
+    source_fingerprint TEXT,
+    reserved_at TIMESTAMP NOT NULL,
+    expires_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reservations_active ON topic_reservations(expires_at);
+
+CREATE TABLE IF NOT EXISTS comment_locks (
+    id INTEGER PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    post_id TEXT NOT NULL UNIQUE,
+    locked_at TIMESTAMP NOT NULL,
+    expires_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_comment_locks_expiry ON comment_locks(expires_at);
+
+CREATE TABLE IF NOT EXISTS news_cooldowns (
+    id INTEGER PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    news_fingerprint TEXT NOT NULL UNIQUE,
+    source_url TEXT,
+    headline_hash TEXT,
+    created_at TIMESTAMP NOT NULL,
+    cooldown_until TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_news_cooldowns_active ON news_cooldowns(cooldown_until);
 """

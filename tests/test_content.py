@@ -3,9 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.db.database import init_db
 from src.content.generator import ContentGenerator
-from src.content.publisher import ContentPublisher
 from src.content.market_data import get_trending_coins
 
 
@@ -97,40 +95,3 @@ def test_build_user_prompt_empty():
     prompt = gen._build_user_prompt({}, {})
     assert "crypto" in prompt
 
-
-# ---- Publisher tests ----
-
-@pytest.fixture
-async def publisher(tmp_path):
-    db_path = str(tmp_path / "test.db")
-    await init_db(db_path)
-    mock_client = AsyncMock()
-    return ContentPublisher(mock_client, db_path), db_path
-
-
-async def test_queue_and_get_pending(publisher):
-    pub, _ = publisher
-    queue_id = await pub.queue_content("acc1", "Test post $BTC", ["bitcoin"], topic="bitcoin")
-    assert queue_id > 0
-
-    pending = await pub.get_pending("acc1")
-    assert len(pending) == 1
-    assert pending[0]["text"] == "Test post $BTC"
-
-
-async def test_mark_published(publisher):
-    pub, _ = publisher
-    queue_id = await pub.queue_content("acc1", "Test")
-    await pub.mark_published(queue_id, post_id="post_123")
-
-    pending = await pub.get_pending("acc1")
-    assert len(pending) == 0  # No longer pending
-
-
-async def test_mark_failed(publisher):
-    pub, _ = publisher
-    queue_id = await pub.queue_content("acc1", "Test")
-    await pub.mark_failed(queue_id, "API error")
-
-    pending = await pub.get_pending("acc1")
-    assert len(pending) == 0

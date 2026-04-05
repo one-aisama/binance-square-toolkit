@@ -1,150 +1,119 @@
-# Binance Square Toolkit — Design Specification
-Date: 2026-03-25
-Status: Current (after testing)
+# Binance Square Toolkit — Дизайн-спецификация
+Дата: 2026-04-03
+Статус: АКТУАЛЬНО (v3, policy-driven)
 
-## Overview
+## Обзор
 
-SDK / toolkit for managing activity on Binance Square through AdsPower profiles.
-The software does NOT make decisions — it is controlled by an AI agent (Claude, Codex, etc.).
-The agent receives tasks from a human, analyzes, generates content, and calls toolkit functions.
+SDK / тулкит для управления активностью на Binance Square через AdsPower профили.
+**Софт = руки. Агент = мозг. Runtime = координация.**
 
-**Software = hands. Agent = brain.**
+- Софт (SDK) выполняет действия: постинг, лайки, комменты, подписки
+- Агент (Claude session) принимает решения и генерирует контент
+- Runtime framework координирует: планирование, аудит, исполнение, метрики
 
-Monetization through Write to Earn (5% base trading commission from readers).
+Монетизация через Write to Earn (5% базовой торговой комиссии от читателей).
 
-## Architecture: Hybrid (httpx + Playwright CDP)
-
-After testing, the architecture evolved from pure CDP-First:
-- **httpx** — parsing (feed, articles, trends, market data), likes. Fast, no browser needed.
-- **Playwright CDP** — posting, commenting, reposts, follows. Required because Binance uses client-side signatures for content creation and DOM-based inputs for comments.
-- **Credentials** — captured once via CDP, stored in SQLite, used by httpx for parsing/likes. Refreshed on expiration.
+## Архитектура по слоям
 
 ```
-AGENT (Claude / Codex / any AI)
-  │ receives task from human
-  │ analyzes, generates content
-  │ calls toolkit functions:
-  │
-  ├── PARSING (httpx + captured cookies)
-  │     ├── get_feed_recommend()    — recommended feed
-  │     ├── get_top_articles()      — trending articles
-  │     ├── get_fear_greed()        — fear/greed index
-  │     ├── get_hot_hashtags()      — hot hashtags
-  │     └── get_market_data()       — coin prices from Binance API
-  │
-  ├── ACTIONS via httpx
-  │     └── like_post()             — like a post
-  │
-  ├── ACTIONS via Playwright CDP (browser)
-  │     ├── create_post()           — post: text + chart + sentiment + image
-  │     ├── create_article()        — article: title + body + cover
-  │     ├── repost()                — quote/repost
-  │     ├── comment_on_post()       — comment (Follow & Reply popup handling)
-  │     ├── follow_author()         — follow (check if already following)
-  │     └── browse_and_interact()   — feed browsing: like + comment + follow
-  │
-  ├── SESSION MANAGER
-  │     ├── AdsPowerClient          — start/stop profiles
-  │     ├── harvester               — credential capture via CDP
-  │     ├── credential_store        — CRUD in SQLite for cookies/headers
-  │     └── validator               — credential liveness check
-  │
-  ├── ACCOUNTS
-  │     ├── manager                 — YAML config loading (accounts + personas)
-  │     ├── limiter                 — daily action limit control
-  │     └── anti_detect             — account isolation rules
-  │
-  └── DB (SQLite)
-        └── credentials, actions_log, daily_stats, content_queue,
-            parsed_trends, parsed_posts, discovered_endpoints
+┌─────────────────────────────────────────────────────┐
+│  Entry points: session_run.py / main.py             │
+├─────────────────────────────────────────────────────┤
+│  Runtime framework (src/runtime/, 29 модулей)      │
+│  session_loop → planner → auditor → executor        │
+├─────────────────────────────────────────────────────┤
+│  Data pipeline                                       │
+│  metrics/ → memory/ → strategy/                     │
+├─────────────────────────────────────────────────────┤
+│  SDK facade (src/sdk.py)                            │
+├──────────┬──────────┬───────────┬───────────────────┤
+│ session/ │ bapi/    │ content/  │ activity/         │
+├──────────┴──────────┴───────────┴───────────────────┤
+│  accounts/ │ db/ (SQLite WAL) │ config/ (YAML)      │
+└─────────────────────────────────────────────────────┘
 ```
 
-## Scheduler (optional)
+### Transport
+- **sdk.py** — единый фасад для агента: connect, create_post, comment, like, follow, feed, market data
+- **session/** — AdsPower CDP, browser_actions (publishing), browser_engage (engagement), browser_data (парсинг), harvester (credentials)
+- **bapi/** — httpx клиент к Binance bapi с retry и rate limit (30 RPM)
 
-APScheduler can run parsing→generation→publishing→engagement cycles on a schedule. But this is optional — the agent decides when and what to run. The scheduler is one possible orchestration method, not a required component.
+### Coordination
+- **topic_reservations** (SQLite) — кросс-агентная блокировка тем (coin+angle+source), TTL 2 часа
+- **post_registry** — реестр опубликованных постов (72-часовое окно) для overlap avoidance
 
-## Content Generation
+### Runtime framework
+Автономный цикл агента:
+1. **SessionContextBuilder** → сбор контекста (рынок, новости, TA, фид, реплаи)
+2. **CyclePolicy** → выбор stage (bootstrap / default / overflow / reply_limited)
+3. **DeterministicPlanGenerator** → JSON план (comment, like, follow, post) без LLM
+4. **EditorialBrain** → brief для поста (family, coin, angle, hooks, insights)
+5. **Агент** (Claude Code сессия) → пишет текст сам, используя brief_context и свои файлы
+6. **PlanAuditor** → детерминированная валидация (8 слоёв: стиль, дубликаты, overlap, reservations)
+7. **PlanExecutor** → исполнение через SDK + VisualPipeline (картинки)
+8. **Commit** → daily_plan, post_registry, topic_reservation, journal
 
-Content generation is the agent's task, not the software's. The toolkit provides:
-- `ContentGenerator` — a tool for sending a prompt to an AI API and receiving text. The agent decides what to generate.
-- `CommentGenerator` — a tool for generating short comments (uses a cheap model, DeepSeek by default). The agent decides which post and what context to pass.
-- `get_market_data()` — real coin prices for use in content.
+### Policy (per-agent)
+- **persona_policies/{agent_id}.yaml** — все behavioral параметры: content mix, coin bias, angle rules, stages, audit style, comment stance, feed scoring
+- **active_agent.{agent_id}.yaml** — runtime binding: AdsPower profile, symbols, session limits, visual config
+- **accounts/{agent_id}.yaml** — daily limits, proxy, credentials
 
-Content rules are defined in `config/content_rules.yaml` — the agent follows them when constructing prompts.
+### Data pipeline
+- **metrics/** — store (SQLite), collector (отложенный сбор outcomes 6h+), scorer (агрегация insights + auto-lessons)
+- **memory/** — compactor: генерация performance.md, relationships.md из insights
+- **strategy/** — analyst (обновление strategy.md), reviewer (session stats + journal), feed_filter (спам-фильтр)
+- **pipeline.py** — оркестрация: collector → scorer → compactor → analyst
 
-## Tested and Working (live testing 2026-03-24)
+### State (per-agent files)
+- `data/runtime/{agent_id}/` — checkpoint.json, daily_plan.json, status.json
+- `data/generated_visuals/{agent_id}/` — AI-сгенерированные картинки
+- `agents/{agent_id}/` — identity, style, strategy, lessons, journal, performance, relationships
 
-| Action | Method | Status | Notes |
-|--------|--------|--------|-------|
-| Credential capture | CDP | working | 32 cookies, 13 headers |
-| Recommended feed parsing | httpx | working | 21 posts per page |
-| Top articles parsing | httpx | working | |
-| Fear/greed index | httpx | working | POST, not GET (discovered during spike) |
-| Hot hashtags | httpx | working | |
-| Market data (prices) | httpx | working | Binance public API |
-| Post like | httpx | working | `POST /bapi/composite/v1/private/pgc/content/like` |
-| Post creation | CDP browser | working | Text + chart + bullish/bearish |
-| Post comment | CDP browser | working | Handles "Follow & Reply" popup |
-| Author follow | CDP browser | working | Checks "Follow" vs "Following" |
-| Feed browsing + interaction | CDP browser | working | Scroll, filter, like+comment+follow |
+## Hybrid Transport (httpx + Playwright CDP)
 
-## Key Technical Discoveries (from spike + testing)
+- **httpx** — парсинг (лента, статьи, тренды, рыночные данные), лайки. Быстро, без браузера.
+- **Playwright CDP** — постинг, комментирование, репосты, подписки. Требуется client-side signature.
+- **Credentials** — захватываются через CDP, хранятся в SQLite (зашифрованы), используются httpx.
 
-1. **Feed recommend** requires `scene: "web-homepage"` and `contentIds: []` in the POST body. Data is in `data.vos`, not `data.list`.
+## Карта модулей
 
-2. **Fear & Greed** is a POST, not GET (specification was incorrect).
+| Модуль | Путь | Назначение |
+|--------|------|------------|
+| sdk | src/sdk.py | Единый фасад для агента |
+| session | src/session/ | AdsPower, CDP, browser actions/data, web authoring |
+| bapi | src/bapi/ | httpx клиент к Binance bapi |
+| parser | src/parser/ | Парсинг фида, статей, тренды |
+| content | src/content/ | AI-генерация, валидация, market data, news, TA |
+| activity | src/activity/ | Лайки, комменты, репосты (оркестрация) |
+| runtime | src/runtime/ | 29 модулей: планирование, аудит, исполнение, guard |
+| metrics | src/metrics/ | MetricsStore, Collector, Scorer |
+| memory | src/memory/ | Compactor (performance.md, relationships.md) |
+| strategy | src/strategy/ | Planner, Analyst, Reviewer, FeedFilter |
+| pipeline | src/pipeline.py | Оркестрация data pipeline |
+| accounts | src/accounts/ | YAML конфиги, лимиты, анти-детект |
+| db | src/db/ | SQLite схема (10 таблиц), инициализация |
 
-3. **Like endpoint**: `POST /bapi/composite/v1/private/pgc/content/like` with body `{"id": "<post_id>", "cardType": "BUZZ_SHORT"}`.
+## База данных (SQLite + WAL mode)
 
-4. **Post creation** requires client-side `nonce` + `signature` — cannot be done via httpx. Browser only.
+10 таблиц: credentials, actions_log, daily_stats, parsed_trends, parsed_posts, discovered_endpoints, post_tracker, topic_reservations, comment_locks, news_cooldowns.
 
-5. **Comments** go through the DOM input `input[placeholder="Post your reply"]` + Reply button. Not via bapi POST.
+YAML — источник истины для конфигов. SQLite хранит runtime-данные.
 
-6. **Hashtag autocomplete** blocks the Post button — need to press Escape after entering a hashtag.
+## Добавление нового агента
 
-7. **Two Post buttons** on the Square page: left panel button (opens a modal) and inline button (publishes). Must use inline: `button[data-bn-type='button']:not(.news-post-button)`.
+1. `config/persona_policies/{id}.yaml` — behavioral policy
+2. `config/active_agent.{id}.yaml` — runtime binding (AdsPower, symbols, visual)
+3. `config/accounts/{id}.yaml` — account credentials и daily limits
+4. `agents/{id}/` — identity.md, style.md, strategy.md, prompt.md, visual_profile.md
+5. Ноль изменений в Python коде
 
-8. **Follow & Reply popup** — some authors restrict comments to followers. Clicking "Follow & Reply" follows and submits the comment simultaneously.
+## Известные ограничения
 
-9. **Follow vs Following** — clicking the "Following" button will UNFOLLOW. Must check button text before clicking.
+1. **create_post() confirmation** — подтверждение публикации через network response (`content/add`). При отсутствии — `publish_unconfirmed`. Нужен robust fallback (composer cleared, success toast, URL change).
+2. **BapiClient stubs** — `comment_post()`, `repost()`, `create_post()` через httpx — stubs (NotImplementedError). Реальный путь: browser_actions (CDP).
+3. **Селекторы** — CSS-селекторы в page_map.py хрупкие. Обновления UI Binance Square могут сломать.
 
-10. **Required bapi headers**: `csrftoken`, `bnc-uuid`, `device-info`, `fvideo-id`, `fvideo-token`, `clienttype`, `lang`, `bnc-location`, `versioncode`, `user-agent`. Without `fvideo-*` headers, bapi returns `data: null`.
-
-## Content Rules (config/content_rules.yaml)
-
-- Language: English only
-- Style: casual, human, conversational. No AI cliches.
-- Posts and quote reposts: minimum 2 paragraphs, $CASHTAGS for coins
-- Comments: 1-2 sentences, relevant to the post content, like a conversation with the author
-- Quote reposts: $CASHTAGS only if the original post is about a specific coin
-- All content is generated by the controlling agent through toolkit tools (`ContentGenerator`, `CommentGenerator`), not by the software autonomously
-
-## Database (SQLite + WAL mode)
-
-7 tables: credentials, actions_log, daily_stats, content_queue, parsed_trends, parsed_posts, discovered_endpoints.
-
-YAML is the source of truth for account/persona configs. SQLite stores only runtime data.
-
-## Configuration
-
-- `config/accounts/{id}.yaml` — account infrastructure (adspower_profile_id, proxy, limits)
-- `config/personas.yaml` — 6 personas (style, topics, language)
-- `config/settings.yaml` — global settings (intervals, limits, AI provider)
-- `config/content_rules.yaml` — content generation rules (for the agent)
-- `.env` — API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY)
-
-## Known Issues
-
-1. **ActionLimiter** — 2 bugs in daily limit counting logic (2 failing tests)
-2. **ActivityExecutor** — tries to use httpx for comments/reposts instead of browser_actions
-3. **Article creation** — not tested live
-4. **Repost** — not tested live
-5. **Image attachment** — not tested live
-6. **Author profile viewing** — not implemented
-7. **Post/comment deletion** — not implemented
-8. **Multi-profile orchestration** — not tested (only one profile so far)
-
-## Dependencies
+## Зависимости
 
 ```
 httpx>=0.27

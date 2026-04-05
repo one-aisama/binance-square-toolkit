@@ -59,7 +59,7 @@ Collect posts from Binance Square feed for agent to review.
 **Returns:** `list[dict]` — each dict:
 ```python
 {
-    "post_id": "123456789012345",
+    "post_id": "305668937425010",
     "author": "CryptoAnalyst",
     "text": "Full post text without cookie banners...",
     "like_count": 244
@@ -109,7 +109,7 @@ Fetch engagement stats for a specific post.
 
 **Returns:** `dict`
 ```python
-{"post_id": "123456789012346...", "likes": "1", "comments": "0", "quotes": "0",
+{"post_id": "306032...", "likes": "1", "comments": "0", "quotes": "0",
  "title_preview": "me watching my portfolio..."}
 ```
 
@@ -119,12 +119,12 @@ Fetch own profile stats from Creator Center. No parameters — uses connected pr
 **Returns:** `dict`
 ```python
 {
-    "username": "aisama", "handle": "@aisama", "name": "aisama",
-    "followers": "3", "following": "10", "liked": "26", "shared": "0",
+    "username": "my_agent", "handle": "@my_agent", "name": "My Agent",
+    "followers": "150", "following": "45", "liked": "320", "shared": "12",
     "dashboard": {
-        "period": "Period: 2026-03-26...",
-        "published": "3", "followers_gained": "0",
-        "views": "106", "likes": "2", "shares": "0"
+        "period": "Period: 2026-04-01...",
+        "published": "15", "followers_gained": "8",
+        "views": "2450", "likes": "89", "shares": "5"
     }
 }
 ```
@@ -229,7 +229,7 @@ Create a new post on Binance Square.
 
 **Returns:** `dict`
 ```python
-{"success": True, "post_id": "123456789012347", "response": {...}}
+{"success": True, "post_id": "305847920721665", "response": {...}}
 ```
 
 **Notes:**

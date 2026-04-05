@@ -1,31 +1,31 @@
-# Specification: Bapi Client Module
+# Спецификация: Модуль Bapi Client
 
-**Path:** `src/bapi/`
-**Files:** `client.py`, `endpoints.py`, `models.py`
-
----
-
-## Description
-
-The Bapi module is the single HTTP gateway between the toolkit and Binance's internal bapi API. It injects captured credentials (cookies + headers) into every request, enforces per-account rate limiting, retries on transient errors, and automatically invalidates credentials on authentication errors. It also provides typed Pydantic models for bapi responses and a central constants file with all known endpoint paths.
+**Путь:** `src/bapi/`
+**Файлы:** `client.py`, `endpoints.py`, `models.py`
 
 ---
 
-## User Stories
+## Описание
 
-- As an agent, I want to call `get_feed_recommend()`, `get_top_articles()`, `get_fear_greed()`, and `get_hot_hashtags()` without manually managing HTTP headers, so I can focus on data processing.
-- As an agent, I want bapi requests to automatically use the correct credentials for a specific account, so I can work with multiple accounts without confusion.
-- As an agent, I want failed requests due to rate limiting or server errors to be automatically retried, so transient failures don't interrupt a session.
-- As an agent, I want authentication errors (HTTP 401/403) to immediately invalidate credentials and return a clear error, so I know I need to recapture credentials rather than continue retrying.
-- As an agent, I want a central endpoint constants file, so I never hardcode paths in business logic.
+Модуль Bapi — единый HTTP-шлюз между тулкитом и внутренним bapi API Binance. Он инжектирует захваченные credentials (cookies + headers) в каждый запрос, обеспечивает rate limit на уровне аккаунта, делает retry при транзиентных ошибках и автоматически инвалидирует credentials при ошибках аутентификации. Также предоставляет типизированные Pydantic-модели для ответов bapi и центральный файл констант со всеми известными путями эндпоинтов.
 
 ---
 
-## Data Model
+## Пользовательские сценарии
 
-No own tables. `BapiClient` reads from the `credentials` table via `CredentialStore`. Does not write anything itself.
+- Как агент, я хочу вызывать `get_feed_recommend()`, `get_top_articles()`, `get_fear_greed()` и `get_hot_hashtags()` без ручного управления HTTP-заголовками, чтобы сосредоточиться на обработке данных.
+- Как агент, я хочу, чтобы bapi-запросы автоматически использовали правильные credentials для конкретного аккаунта, чтобы работать с несколькими аккаунтами без путаницы.
+- Как агент, я хочу, чтобы неудачные запросы из-за rate limiting или серверных ошибок автоматически повторялись, чтобы транзиентные сбои не прерывали сессию.
+- Как агент, я хочу, чтобы при ошибках аутентификации (HTTP 401/403) credentials немедленно инвалидировались и возвращалась понятная ошибка, чтобы я знал, что нужно перезахватить credentials, а не продолжать повторять запросы.
+- Как агент, я хочу иметь центральный файл констант эндпоинтов, чтобы никогда не хардкодить пути в бизнес-логике.
 
-Pydantic models in `src/bapi/models.py`:
+---
+
+## Модель данных
+
+Собственных таблиц нет. `BapiClient` читает из таблицы `credentials` через `CredentialStore`. Сам ничего не записывает.
+
+Pydantic-модели в `src/bapi/models.py`:
 
 ### BapiResponse
 ```python
@@ -76,48 +76,48 @@ class BapiClient:
     )
 ```
 
-`rate_limit_rpm` is converted to `min_interval = 60 / rate_limit_rpm` seconds between requests.
+`rate_limit_rpm` преобразуется в `min_interval = 60 / rate_limit_rpm` секунд между запросами.
 
-#### Low-level Methods
+#### Низкоуровневые методы
 
-| Method | Signature | Returns |
-|--------|-----------|---------|
-| `get` | `(path: str, params: dict \| None = None) -> dict` | Raw bapi response dict |
-| `post` | `(path: str, data: dict \| None = None) -> dict` | Raw bapi response dict |
+| Метод | Сигнатура | Возвращает |
+|-------|-----------|------------|
+| `get` | `(path: str, params: dict \| None = None) -> dict` | Сырой dict ответа bapi |
+| `post` | `(path: str, data: dict \| None = None) -> dict` | Сырой dict ответа bapi |
 
-Both delegate to `_request(method, path, params, json_data)`, which:
-1. Applies rate limiting (sleeps if `elapsed < min_interval`)
-2. Loads credentials via `CredentialStore.load(account_id)`
-3. Assembles headers: `content-type: application/json`, serialized `cookie` string, then all captured headers
-4. Executes request via `httpx.AsyncClient`, timeout=30s
-5. On HTTP 401/403: calls `CredentialStore.invalidate()`, raises `BapiCredentialError`
-6. On HTTP 429/500/502/503: retries up to `retry_attempts` with exponential backoff (`retry_backoff * 2^(attempt-1)`)
-7. On `httpx.TimeoutException` / `httpx.NetworkError`: retries similarly
+Оба делегируют в `_request(method, path, params, json_data)`, который:
+1. Применяет rate limiting (засыпает, если `elapsed < min_interval`)
+2. Загружает credentials через `CredentialStore.load(account_id)`
+3. Собирает заголовки: `content-type: application/json`, сериализованная строка `cookie`, затем все захваченные заголовки
+4. Выполняет запрос через `httpx.AsyncClient`, timeout=30s
+5. При HTTP 401/403: вызывает `CredentialStore.invalidate()`, бросает `BapiCredentialError`
+6. При HTTP 429/500/502/503: retry до `retry_attempts` с экспоненциальным backoff (`retry_backoff * 2^(attempt-1)`)
+7. При `httpx.TimeoutException` / `httpx.NetworkError`: retry аналогично
 
-#### Convenience Parsing Methods
+#### Удобные методы парсинга
 
-| Method | Signature | Returns |
-|--------|-----------|---------|
-| `get_feed_recommend` | `(page: int = 1, page_size: int = 20) -> list[dict]` | Posts from `data.vos` or `data.list` |
-| `get_top_articles` | `(page: int = 1, page_size: int = 20) -> list[dict]` | Articles from `data.vos` or `data.list` |
-| `get_fear_greed` | `() -> dict` | Fear/greed data from `data` |
-| `get_hot_hashtags` | `() -> list[dict]` | Hashtag list from `data` |
-| `like_post` | `(post_id: str, card_type: str = "BUZZ_SHORT") -> dict` | Raw bapi response |
+| Метод | Сигнатура | Возвращает |
+|-------|-----------|------------|
+| `get_feed_recommend` | `(page: int = 1, page_size: int = 20) -> list[dict]` | Посты из `data.vos` или `data.list` |
+| `get_top_articles` | `(page: int = 1, page_size: int = 20) -> list[dict]` | Статьи из `data.vos` или `data.list` |
+| `get_fear_greed` | `() -> dict` | Данные страха/жадности из `data` |
+| `get_hot_hashtags` | `() -> list[dict]` | Список хэштегов из `data` |
+| `like_post` | `(post_id: str, card_type: str = "BUZZ_SHORT") -> dict` | Сырой ответ bapi |
 
-#### Stub Methods (not implemented)
+#### Stub-методы (не реализованы)
 
-| Method | Raises |
-|--------|--------|
-| `create_post(text, hashtags)` | `NotImplementedError` — use `browser_actions.create_post()` |
-| `comment_post(post_id, text)` | `NotImplementedError` — use `browser_actions.comment_on_post()` |
-| `repost(post_id)` | `NotImplementedError` — use `browser_actions.repost()` |
+| Метод | Бросает |
+|-------|---------|
+| `create_post(text, hashtags)` | `NotImplementedError` — используйте `browser_actions.create_post()` |
+| `comment_post(post_id, text)` | `NotImplementedError` — используйте `browser_actions.comment_on_post()` |
+| `repost(post_id)` | `NotImplementedError` — используйте `browser_actions.repost()` |
 
 ---
 
 ### Endpoints (`src/bapi/endpoints.py`)
 
-| Constant | Path | Method |
-|----------|------|--------|
+| Константа | Путь | Метод |
+|-----------|------|-------|
 | `FEED_RECOMMEND` | `/bapi/composite/v9/friendly/pgc/feed/feed-recommend/list` | POST |
 | `TOP_ARTICLES` | `/bapi/composite/v3/friendly/pgc/content/article/list` | GET |
 | `FEAR_GREED` | `/bapi/composite/v1/friendly/pgc/card/fearGreedHighestSearched` | POST |
@@ -129,60 +129,60 @@ Both delegate to `_request(method, path, params, json_data)`, which:
 | `SUGGESTED_CREATORS` | `/bapi/composite/v1/friendly/pgc/suggested/creator/list` | POST |
 | `LIKE_POST` | `/bapi/composite/v1/private/pgc/content/like` | POST |
 
-Endpoints for comments and reposts have not been discovered yet.
+Эндпоинты для комментариев и репостов пока не обнаружены.
 
 ---
 
-## Business Logic
+## Бизнес-логика
 
-### FEED_RECOMMEND Request Body
-Must contain `scene: "web-homepage"` and `contentIds: []` in the POST body, otherwise the endpoint returns empty results. Response data is in `data.vos`, not `data.list`.
+### Тело запроса для FEED_RECOMMEND
+Должно содержать `scene: "web-homepage"` и `contentIds: []` в теле POST-запроса, иначе эндпоинт возвращает пустые результаты. Данные ответа находятся в `data.vos`, не в `data.list`.
 
-### Fear & Greed is POST, not GET
-`FEAR_GREED` requires a `POST` with empty JSON body `{}`. A `GET` request returns an error.
+### Fear & Greed — это POST, не GET
+`FEAR_GREED` требует `POST` с пустым JSON-телом `{}`. `GET`-запрос возвращает ошибку.
 
-### Like Request Body
-`LIKE_POST` requires `{"id": "<post_id>", "cardType": "BUZZ_SHORT"}`. The `cardType` field is mandatory.
+### Тело запроса лайка
+`LIKE_POST` требует `{"id": "<post_id>", "cardType": "BUZZ_SHORT"}`. Поле `cardType` обязательно.
 
-### fvideo Headers are Required
-Without `fvideo-id` and `fvideo-token` in request headers, bapi returns `data: null` even with HTTP 200. They must be present in captured headers.
+### Заголовки fvideo обязательны
+Без `fvideo-id` и `fvideo-token` в заголовках запроса bapi возвращает `data: null` даже при HTTP 200. Они должны присутствовать в захваченных заголовках.
 
-### Credential Injection Flow
+### Поток инъекции credentials
 ```
-_request() called
+_request() вызван
   → CredentialStore.load(account_id)
-  → if None → raise BapiCredentialError
-  → assemble cookie string from cookies dict
-  → copy all captured headers (except "cookie") into request_headers
-  → execute httpx request
-  → if 401/403 → CredentialStore.invalidate() → raise BapiCredentialError
-  → if retryable status → retry with backoff
-  → return parsed JSON dict
+  → если None → бросить BapiCredentialError
+  → собрать строку cookie из dict cookies
+  → скопировать все захваченные заголовки (кроме "cookie") в request_headers
+  → выполнить httpx-запрос
+  → если 401/403 → CredentialStore.invalidate() → бросить BapiCredentialError
+  → если retryable статус → retry с backoff
+  → вернуть распарсенный JSON dict
 ```
 
-### Rate Limiting
-`_last_request_time` is an instance variable. Each request checks `time.monotonic() - _last_request_time` and sleeps if the interval hasn't elapsed. This is per-instance (per-account), not global.
+### Rate limiting
+`_last_request_time` — переменная экземпляра. Каждый запрос проверяет `time.monotonic() - _last_request_time` и засыпает, если интервал не прошёл. Это на уровне экземпляра (на аккаунт), не глобально.
 
 ---
 
-## Edge Cases
+## Крайние случаи
 
-| Situation | Expected Behavior |
-|-----------|-------------------|
-| `CredentialStore.load()` returns None | `BapiCredentialError` raised immediately, no HTTP request made |
-| HTTP 401 or 403 | Credentials invalidated via `CredentialStore.invalidate()`, `BapiCredentialError` raised |
-| HTTP 429 (rate limit from Binance) | Retry up to `retry_attempts` with exponential backoff, then `BapiRequestError` raised |
-| HTTP 500/502/503 | Same retry behavior as 429 |
-| Network timeout | `BapiRequestError` after `retry_attempts` retries |
-| `data.vos` and `data.list` both missing from response | Returns empty list `[]` |
-| `get_fear_greed` returns non-dict `data` | Returns empty dict `{}` |
-| `get_hot_hashtags` returns non-list `data` | Returns empty list `[]` |
-| `like_post` called with non-existent post_id | Bapi returns error code in response body; raw dict is returned, no exception |
+| Ситуация | Ожидаемое поведение |
+|----------|---------------------|
+| `CredentialStore.load()` возвращает None | `BapiCredentialError` бросается сразу, HTTP-запрос не выполняется |
+| HTTP 401 или 403 | Credentials инвалидируются через `CredentialStore.invalidate()`, бросается `BapiCredentialError` |
+| HTTP 429 (rate limit от Binance) | Retry до `retry_attempts` с экспоненциальным backoff, затем бросается `BapiRequestError` |
+| HTTP 500/502/503 | Такое же поведение retry как при 429 |
+| Таймаут сети | `BapiRequestError` после `retry_attempts` повторов |
+| `data.vos` и `data.list` отсутствуют в ответе | Возвращает пустой список `[]` |
+| `get_fear_greed` возвращает не-dict `data` | Возвращает пустой dict `{}` |
+| `get_hot_hashtags` возвращает не-list `data` | Возвращает пустой список `[]` |
+| `like_post` вызван с несуществующим post_id | Bapi возвращает код ошибки в теле ответа; сырой dict возвращается, исключения нет |
 
 ---
 
-## Priority and Dependencies
+## Приоритет и зависимости
 
-- **Priority:** High
-- **Depends on:** `src/session/credential_store.py` (must be initialized before creating `BapiClient`), `src/db/` (SQLite schema for credentials table)
-- **Blocks:** `src/parser/fetcher.py` (TrendFetcher), `src/activity/executor.py` (like_post)
+- **Приоритет:** Высокий
+- **Зависит от:** `src/session/credential_store.py` (должен быть инициализирован до создания `BapiClient`), `src/db/` (SQLite-схема для таблицы credentials)
+- **Блокирует:** `src/parser/fetcher.py` (TrendFetcher), `src/activity/executor.py` (like_post)

@@ -1,29 +1,31 @@
 # Current Strategy
 
-## Status: Early Growth — starting from zero
-Last updated: example
+## Status: Analytical Growth
+Last updated: 2026-03-30
 
 ## Focus
-Comments on popular posts (100+ likes) are the main growth engine. Posts without followers get near-zero distribution. Focus 70% effort on comments, 30% on posts with images.
+Comments on visible threads are still the main growth engine.
+Original posts should make aisama feel more analytical and more composed than the rest of the feed, not just more active
+
+## Priority lanes
+- BTC, ETH, market structure, positioning, ETF/liquidity flow
+- High-signal replies on visible creator threads
+- 1 original post at a time with a clear thesis instead of repetitive chart spam
 
 ## What works
-- Data-backed comments on posts with 15+ likes — stand out from generic comments
-- Targeting influencers (10-50K followers) who respond to quality comments — high-value relationships
-- Chart screenshots and memes boost post visibility
-- Flat/red market days = high engagement, more people scrolling
-- Engaging with posts in 100-265 like range gets visibility in active threads
+- Data-backed disagreement on visible posts
+- Slightly longer posts when the thought is actually better than a one-liner
+- Clean chart cards and occasional relevant visuals instead of repetitive screenshots
+- Comments that expose where the crowd is too confident
 
 ## What to improve
-- Make comments more provocative/personality-driven — zero replies means comments are too dry
-- Use K notation for TA levels in posts to bypass price validator ($76K not $76,000)
-- Build relationships with 2-3 influencers who engage back
-- Try institutional news angle posts
-- Add more personality — hot takes, humor, contrarian views. Pure data doesn't get replies
+- Build more repeat interactions with the same quality authors
+- Reduce templated closing lines and default hashtag endings
+- Keep the voice analytical without becoming cold or robotic
 
 ## What to avoid
-- Generic comments ("Great post!", "Nice analysis!")
-- Posting without images
-- More than 2 comments on same author per session
-- Forced content when feed is garbage — better to like and move on
-- Mismatched comments (BTC data on altcoin/meme posts)
-- Dollar signs on TA levels far from current price (triggers verify_prices validator)
+- Repetitive BTC relief-bounce posts
+- Generic comment energy
+- Forced images
+- Posts that end with the same rhythm every time
+- Copying SweetDi's shorter coin-breakdown style

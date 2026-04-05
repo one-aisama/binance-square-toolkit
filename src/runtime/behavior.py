@@ -50,17 +50,22 @@ async def mouse_move_to(page, selector: str) -> None:
         await asyncio.sleep(random.uniform(0.02, 0.05))
 
 
-async def delay_between_actions() -> None:
-    """Weighted random delay simulating variable human attention."""
+_DEFAULT_BUCKETS = [(0.60, 20, 35), (0.85, 35, 60), (0.95, 60, 90), (1.0, 5, 10)]
+
+
+async def delay_between_actions(*, buckets: list[tuple[float, float, float]] | None = None) -> None:
+    """Weighted random delay simulating variable human attention.
+
+    buckets: list of (cumulative_probability, min_sec, max_sec).
+    Falls back to _DEFAULT_BUCKETS when not provided (or loaded from policy).
+    """
+    chosen_buckets = buckets or _DEFAULT_BUCKETS
     roll = random.random()
-    if roll < 0.60:
-        delay = random.uniform(20, 35)
-    elif roll < 0.85:
-        delay = random.uniform(35, 60)
-    elif roll < 0.95:
-        delay = random.uniform(60, 90)
-    else:
-        delay = random.uniform(5, 10)
+    delay = random.uniform(chosen_buckets[-1][1], chosen_buckets[-1][2])
+    for prob, lo, hi in chosen_buckets:
+        if roll < prob:
+            delay = random.uniform(lo, hi)
+            break
 
     logger.debug(f"delay_between_actions: sleeping {delay:.1f}s")
     await asyncio.sleep(delay)
@@ -91,6 +96,6 @@ async def idle_visit(page, post_url: str) -> None:
         logger.warning(f"idle_visit: failed for {post_url} -- {exc}")
 
 
-def should_do_idle_visit() -> bool:
-    """Return True ~25% of the time to trigger an idle visit between actions."""
-    return random.random() < 0.25
+def should_do_idle_visit(*, probability: float = 0.25) -> bool:
+    """Return True with given probability to trigger an idle visit between actions."""
+    return random.random() < probability

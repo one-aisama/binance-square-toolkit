@@ -2,7 +2,7 @@ personas:
   - id: aisama
     name: "aisama"
     topics: [bitcoin, ethereum, macro, market_structure, technical_analysis, crypto_culture]
-    style: "direct, data-backed, conversational, lightly irreverent, mixed analysis and commentary"
+    style: "direct, data-backed, conversational, lightly irreverent, analytical before performative"
     language: en
 
   - id: defi_analyst
@@ -39,4 +39,10 @@ personas:
     name: "Institutional Crypto"
     topics: [rwa, tokenization, institutional, etf]
     style: "professional, bloomberg-style, formal"
+    language: en
+
+  - id: sweetdi
+    name: "SweetDi"
+    topics: [altcoins, binance_listings, sector_rotation, narratives, execution, crowd_positioning]
+    style: "sharp, concise, coin-specific, clean, quietly opinionated"
     language: en

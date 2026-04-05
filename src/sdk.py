@@ -17,6 +17,7 @@ Usage:
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -24,13 +25,18 @@ import httpx
 from src.runtime.guard import ActionGuard, Verdict
 
 from src.session.browser_actions import (
-    collect_feed_posts,
-    comment_on_post,
     create_post,
     create_article,
-    engage_post,
     repost,
+)
+from src.session.browser_engage import (
+    comment_on_post,
+    engage_post,
+    like_post as _browser_like_post,
     follow_author,
+)
+from src.session.browser_data import (
+    collect_feed_posts,
     get_user_profile,
     get_post_comments,
     get_my_comment_replies,
@@ -41,23 +47,38 @@ from src.content.market_data import get_market_data, get_trending_coins
 from src.content.news import get_crypto_news, get_article_content
 from src.content.technical_analysis import get_ta_summary
 from src.content.validator import validate_post, validate_comment, validate_article, validate_quote, verify_prices
-from src.runtime.behavior import warm_up, mouse_move_to
 
 logger = logging.getLogger("bsq.sdk")
 
 ADSPOWER_BASE = "http://local.adspower.net:50325"
 
 
-class BinanceSquareSDK:
+from src.sdk_screenshot import SDKScreenshotMixin, SDKError
+
+
+class BinanceSquareSDK(SDKScreenshotMixin):
     """Unified SDK for AI agent to manage Binance Square profile.
 
     Agent uses this as the single entry point. All browser/API details hidden.
     """
 
-    def __init__(self, profile_serial: str = "1", account_id: str = "default", db_path: str = "data/bsq.db"):
+    def __init__(
+        self,
+        profile_serial: str = "1",
+        account_id: str = "default",
+        db_path: str = "data/bsq.db",
+        max_session_actions: int = 80,
+        session_minimum: dict[str, int] | None = None,
+        profile_username: str | None = None,
+        adspower_base_url: str | None = None,
+    ):
         self._serial = profile_serial
         self._account_id = account_id
         self._db_path = db_path
+        self._max_session_actions = max_session_actions
+        self._session_minimum = session_minimum or {"like": 20, "comment": 20, "post": 3}
+        self._profile_username = profile_username
+        self._adspower_base_url = adspower_base_url or os.getenv("BSQ_ADSPOWER_BASE_URL") or ADSPOWER_BASE
         self._ws_endpoint: str | None = None
         self._guard: ActionGuard | None = None
         self._pw = None
@@ -68,25 +89,25 @@ class BinanceSquareSDK:
 
     async def connect(self) -> None:
         """Connect to AdsPower browser profile. Must be called before any action."""
-        # Check if already active
+        base_url = self._adspower_base_url
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(
-                f"{ADSPOWER_BASE}/api/v1/browser/active",
+                f"{base_url}/api/v1/browser/active",
                 params={"serial_number": self._serial},
             )
             data = resp.json()
 
         if data.get("code") == 0 and data.get("data", {}).get("status") == "Active":
             self._ws_endpoint = data["data"]["ws"]["puppeteer"]
-            logger.info(f"Connected to active profile {self._serial}")
+            logger.info("Connected to active profile %s via %s", self._serial, base_url)
             await self._init_persistent_page()
             self._init_guard()
             return
 
-        # Profile not active — start it
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.get(
-                f"{ADSPOWER_BASE}/api/v1/browser/start",
+                f"{base_url}/api/v1/browser/start",
                 params={"user_id": "", "serial_number": self._serial, "open_tabs": "0"},
             )
             data = resp.json()
@@ -95,9 +116,7 @@ class BinanceSquareSDK:
             raise SDKError(f"Failed to start profile {self._serial}: {data.get('msg')}")
 
         self._ws_endpoint = data["data"]["ws"]["puppeteer"]
-        logger.info(f"Started and connected to profile {self._serial}")
-
-        # Create persistent Playwright page
+        logger.info("Started and connected to profile %s via %s", self._serial, base_url)
         await self._init_persistent_page()
         self._init_guard()
 
@@ -111,6 +130,8 @@ class BinanceSquareSDK:
             limiter=limiter,
             limits=limits,
             account_id=self._account_id,
+            max_session_actions=self._max_session_actions,
+            session_minimum=self._session_minimum,
         )
         logger.info(f"Guard initialized for {self._account_id}")
 
@@ -121,7 +142,7 @@ class BinanceSquareSDK:
         self._browser = await self._pw.chromium.connect_over_cdp(self._ws_endpoint)
         context = self._browser.contexts[0] if self._browser.contexts else await self._browser.new_context()
         self._page = context.pages[0] if context.pages else await context.new_page()
-        logger.info("Persistent page created")
+        logger.info("Persistent page ready (reused existing tab)")
 
     async def disconnect(self) -> None:
         """Release connection and close persistent page."""
@@ -147,6 +168,13 @@ class BinanceSquareSDK:
         """Get progress toward session minimum."""
         if self._guard:
             return self._guard.get_minimum_status()
+        return {}
+
+
+    def get_session_stats(self) -> dict[str, Any]:
+        """Expose current guard/session statistics for reviewers and loop runners."""
+        if self._guard:
+            return self._guard.get_session_stats()
         return {}
 
     def _require_connection(self) -> str:
@@ -232,7 +260,7 @@ class BinanceSquareSDK:
         ws = self._require_connection()
         return await get_post_comments(ws, post_id, limit=limit, page=self._page)
 
-    async def get_my_comment_replies(self, username: str = "your-username") -> list[dict[str, Any]]:
+    async def get_my_comment_replies(self, username: str = "aisama") -> list[dict[str, Any]]:
         """Find replies to agent's comments on other people's posts.
 
         Goes to profile → Replies tab, finds comments that received replies,
@@ -339,18 +367,41 @@ class BinanceSquareSDK:
         """
         return await get_market_data(symbols)
 
-    # ---- Actions ----
+    async def _load_live_recent_posts(self) -> list[str]:
+        """Load recent profile posts for duplicate and diversity checks."""
+        if not self._profile_username:
+            return []
 
+        try:
+            profile = await self.get_user_profile(self._profile_username)
+        except Exception as exc:
+            logger.warning(
+                "create_post: failed to load recent profile posts for %s — %s",
+                self._profile_username,
+                exc,
+            )
+            return []
+
+        recent_posts: list[str] = []
+        for post in profile.get("recent_posts", []):
+            preview = str(post.get("text_preview", "")).strip()
+            if preview:
+                recent_posts.append(preview)
+        return recent_posts
+
+    def _merge_recent_posts(self, provided: list[str] | None, live_recent: list[str]) -> list[str]:
+        merged: list[str] = []
+        for item in list(provided or []) + list(live_recent):
+            preview = str(item or '').strip()
+            if preview and preview not in merged:
+                merged.append(preview)
+        return merged
+
+    # ---- Actions ----
     async def comment_on_post(
         self, post_id: str, text: str, skip_validation: bool = False,
     ) -> dict[str, Any]:
-        """Post a comment on a specific post.
-
-        Validates comment text before posting. Handles Follow & Reply popup.
-
-        Returns:
-            {success, post_id, followed} or {success: False, validation_errors}
-        """
+        """Post a comment on a specific post with guarded follow escalation."""
         allowed, reason = await self._check_guard("comment")
         if not allowed:
             return {"success": False, "error": f"Guard denied: comment — {reason}"}
@@ -367,10 +418,23 @@ class BinanceSquareSDK:
             if result.warnings:
                 logger.info(f"comment_on_post: validation warnings — {result.warnings}")
 
+        allow_follow_reply, follow_reason = await self._check_guard("follow")
         ws = self._require_connection()
         try:
-            response = await comment_on_post(ws, post_id, text, page=self._page)
-            self._record_guard("comment", success=response.get("success", False))
+            response = await comment_on_post(
+                ws,
+                post_id,
+                text,
+                page=self._page,
+                allow_follow_reply=allow_follow_reply,
+            )
+            if not allow_follow_reply and not response.get("followed"):
+                skipped = list(response.get("skipped_actions") or [])
+                skipped.append(f"follow: {follow_reason}")
+                response = {**response, "skipped_actions": skipped}
+            self._record_guard("comment", success=response.get("success", False), error=response.get("error"))
+            if response.get("followed"):
+                self._record_guard("follow", success=True)
             return response
         except Exception as e:
             self._record_guard("comment", success=False, error=str(e))
@@ -391,18 +455,31 @@ class BinanceSquareSDK:
 
         Args:
             text: Post text (use $BTC style for coins, include #hashtags)
-            coin: Optional coin ticker to attach chart (e.g. "BTC")
-            sentiment: Optional "bullish" or "bearish"
-            image_path: Optional local file path for image
+            coin: Optional coin ticker to attach chart card (e.g. "BTC")
+            sentiment: Optional "bullish" or "bearish" for chart-card posts
+            image_path: Optional local file path for a single custom image
             recent_posts: Optional list of recent post texts for duplicate check
             skip_validation: Skip content validation (default False)
 
         Returns:
             {success, post_id, response} or {success: False, validation_errors, validation_warnings}
         """
+        # coin tag + image_path allowed (tag appears alongside custom image)
+        # coin tag + no image = chart card added automatically
+        # sentiment requires coin tag
+        if sentiment and not coin:
+            return {
+                "success": False,
+                "validation_errors": ["Sentiment requires a coin tag"],
+                "validation_warnings": [],
+            }
+
         allowed, reason = await self._check_guard("post")
         if not allowed:
             return {"success": False, "error": f"Guard denied: post — {reason}"}
+
+        live_recent_posts = await self._load_live_recent_posts()
+        recent_posts = self._merge_recent_posts(recent_posts, live_recent_posts)
 
         if not skip_validation:
             result = validate_post(text, recent_posts=recent_posts)
@@ -416,7 +493,6 @@ class BinanceSquareSDK:
             if result.warnings:
                 logger.info(f"create_post: validation warnings — {result.warnings}")
 
-            # Verify prices in text against live market data
             try:
                 market = await get_market_data(["BTC", "ETH", "SOL", "BNB"])
                 price_warnings = verify_prices(text, market)
@@ -432,7 +508,14 @@ class BinanceSquareSDK:
 
         ws = self._require_connection()
         try:
-            response = await create_post(ws, text, coin=coin, sentiment=sentiment, image_path=image_path, page=self._page)
+            response = await create_post(
+                ws,
+                text,
+                coin=coin,
+                sentiment=sentiment,
+                image_path=image_path,
+                page=self._page,
+            )
             self._record_guard("post", success=response.get("success", False))
             return response
         except Exception as e:
@@ -537,34 +620,116 @@ class BinanceSquareSDK:
         comment: str | None = None,
         follow: bool = False,
     ) -> dict[str, Any]:
-        """Engage with a post in one visit: like + comment + follow.
+        """Engage with a post in one visit: like + comment + follow."""
+        comment_text = (comment or "").strip() or None
+        validation_warnings: list[str] = []
+        if comment_text:
+            validation = validate_comment(comment_text)
+            if not validation.valid:
+                return {
+                    "success": False,
+                    "post_id": post_id,
+                    "liked": False,
+                    "commented": False,
+                    "followed": False,
+                    "errors": [],
+                    "validation_errors": validation.errors,
+                    "validation_warnings": validation.warnings,
+                }
+            validation_warnings = validation.warnings
+            if validation_warnings:
+                logger.info(f"engage_post: validation warnings — {validation_warnings}")
 
-        Opens the post once, does everything, closes. Much more efficient
-        than calling like_post + comment_on_post + follow_user separately.
+        allowed_like = like
+        allowed_comment = comment_text
+        allowed_follow = follow
+        skipped_actions: list[str] = []
 
-        Returns:
-            {success, liked, commented, followed, post_id, errors: []}
-        """
+        if like:
+            like_allowed, like_reason = await self._check_guard("like")
+            if not like_allowed:
+                allowed_like = False
+                skipped_actions.append(f"like: {like_reason}")
+
+        allow_follow_reply = True
+        follow_reason = ""
+        if comment_text or follow:
+            allow_follow_reply, follow_reason = await self._check_guard("follow")
+            if follow and not allow_follow_reply:
+                allowed_follow = False
+                skipped_actions.append(f"follow: {follow_reason}")
+
+        if comment_text:
+            comment_allowed, comment_reason = await self._check_guard("comment")
+            if not comment_allowed:
+                allowed_comment = None
+                skipped_actions.append(f"comment: {comment_reason}")
+
+        if not any([allowed_like, allowed_comment, allowed_follow]):
+            return {
+                "success": False,
+                "post_id": post_id,
+                "liked": False,
+                "commented": False,
+                "followed": False,
+                "errors": skipped_actions,
+                "skipped_actions": skipped_actions,
+                "validation_warnings": validation_warnings,
+                "error": "Guard denied all requested engagement actions",
+            }
+
         ws = self._require_connection()
         result = await engage_post(
-            ws, post_id, like=like, comment_text=comment, follow=follow, page=self._page
+            ws,
+            post_id,
+            like=allowed_like,
+            comment_text=allowed_comment,
+            follow=allowed_follow,
+            page=self._page,
+            allow_follow_reply=allow_follow_reply,
         )
 
-        # Record each sub-action in guard
-        if result.get("liked"):
-            self._record_guard("like", success=True)
-        if result.get("commented"):
-            self._record_guard("comment", success=True)
+        if skipped_actions:
+            result = {**result, "skipped_actions": skipped_actions}
+        if validation_warnings:
+            result = {**result, "validation_warnings": validation_warnings}
+        if not allow_follow_reply and not result.get("followed") and comment_text:
+            skipped = list(result.get("skipped_actions") or [])
+            if not any(entry.startswith("follow:") for entry in skipped):
+                skipped.append(f"follow: {follow_reason}")
+            result = {**result, "skipped_actions": skipped}
+
+        errors = list(result.get("errors") or [])
+        generic_error = str(result.get("error") or "")
+
+        def prefixed_error(prefix: str) -> str | None:
+            for entry in errors:
+                if entry.startswith(f"{prefix}:"):
+                    return entry
+            return None
+
+        if allowed_like:
+            if result.get("liked"):
+                self._record_guard("like", success=True)
+            else:
+                error = prefixed_error("like") or generic_error or None
+                if error:
+                    self._record_guard("like", success=False, error=error)
+
+        if allowed_comment:
+            if result.get("commented"):
+                self._record_guard("comment", success=True)
+            else:
+                error = prefixed_error("comment") or generic_error or result.get("reply_limit_message")
+                if error or result.get("error_code") in {"reply_limit_exceeded", "follow_required"}:
+                    self._record_guard("comment", success=False, error=str(error or result.get("error_code")))
+
         if result.get("followed"):
             self._record_guard("follow", success=True)
-
-        for err in result.get("errors", []):
-            if err.startswith("like:"):
-                self._record_guard("like", success=False, error=err)
-            elif err.startswith("comment:"):
-                self._record_guard("comment", success=False, error=err)
-            elif err.startswith("follow:"):
-                self._record_guard("follow", success=False, error=err)
+        elif allowed_follow:
+            error = prefixed_error("follow") or generic_error or None
+            if error:
+                self._record_guard("follow", success=False, error=error)
 
         return result
 
@@ -579,42 +744,13 @@ class BinanceSquareSDK:
             return {"success": False, "error": f"Guard denied: like — {reason}"}
 
         ws = self._require_connection()
-        # Like via browser — navigate to post and click like button
-        from src.session import page_map
-
-        page = self._page
         try:
-            post_url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
-            await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
-            await asyncio.sleep(5)
-            await warm_up(page)
-
-            # Try detail-level like first (comment pages), then card-level (posts)
-            detail_like = page.locator(page_map.COMMENT_DETAIL_LIKE).first
-            card_like = page.locator(page_map.POST_LIKE_BUTTON).first
-
-            try:
-                await detail_like.wait_for(state="visible", timeout=3_000)
-                await detail_like.scroll_into_view_if_needed()
-                await mouse_move_to(page, page_map.COMMENT_DETAIL_LIKE)
-                await asyncio.sleep(1)
-                await detail_like.click()
-                logger.info(f"Liked comment {post_id} (detail-thumb-up)")
-            except Exception:
-                await card_like.wait_for(state="visible", timeout=10_000)
-                await card_like.scroll_into_view_if_needed()
-                await mouse_move_to(page, page_map.POST_LIKE_BUTTON)
-                await asyncio.sleep(1)
-                await card_like.click()
-                logger.info(f"Liked post {post_id} (thumb-up-button)")
-
-            await asyncio.sleep(3)
-            self._record_guard("like", success=True)
-            return {"success": True, "post_id": post_id}
+            response = await _browser_like_post(ws, post_id, page=self._page)
+            self._record_guard("like", success=response.get("success", False))
+            return response
         except Exception as e:
-            logger.error(f"Like failed on {post_id}: {e}")
             self._record_guard("like", success=False, error=str(e))
-            return {"success": False, "error": str(e)}
+            raise
 
 
     async def download_image(self, image_url: str, filename: str | None = None) -> str:
@@ -650,133 +786,3 @@ class BinanceSquareSDK:
         logger.info(f"Image downloaded: {filepath} ({len(resp.content)} bytes)")
         return filepath
 
-    async def take_screenshot(
-        self,
-        url: str,
-        selector: str | None = None,
-        crop: dict[str, int] | None = None,
-        wait: int = 5,
-    ) -> str:
-        """Take a screenshot of a page or element via browser.
-
-        Uses AdsPower profile browser so IP/fingerprint matches the account.
-
-        Args:
-            url: Page URL to navigate to
-            selector: Optional CSS selector to screenshot specific element
-            crop: Optional {x, y, width, height} to crop the screenshot
-            wait: Seconds to wait after page load (default 5)
-
-        Returns:
-            Absolute path to saved screenshot file (data/screenshots/<timestamp>.png)
-        """
-        import os
-        import time
-
-        self._require_connection()
-        page = self._page
-
-        screenshots_dir = os.path.join("data", "screenshots")
-        os.makedirs(screenshots_dir, exist_ok=True)
-        filename = f"{int(time.time())}.png"
-        filepath = os.path.abspath(os.path.join(screenshots_dir, filename))
-
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-            await asyncio.sleep(wait)
-
-            # Dismiss cookie banners
-            try:
-                await page.locator("button#onetrust-reject-all-handler").click(timeout=3_000)
-                await asyncio.sleep(1)
-            except Exception:
-                pass
-
-            if selector:
-                element = page.locator(selector).first
-                await element.screenshot(path=filepath)
-            elif crop:
-                await page.screenshot(path=filepath, clip=crop)
-            else:
-                await page.screenshot(path=filepath)
-
-            logger.info(f"Screenshot saved: {filepath}")
-            return filepath
-
-        except Exception as e:
-            logger.error(f"take_screenshot: {e}, url={url}")
-            raise SDKError(f"Screenshot failed: {e}") from e
-
-
-    async def screenshot_chart(self, symbol: str = "BTC_USDT", timeframe: str = "1D") -> str:
-        """Screenshot the Binance spot chart for a trading pair.
-
-        Captures the kline chart element and pads it to 16:9 horizontal
-        ratio suitable for article covers and post images.
-        Adapts to any window size — no hardcoded coordinates.
-
-        Args:
-            symbol: Trading pair (e.g. "BTC_USDT", "ETH_USDT", "SOL_USDT")
-            timeframe: Chart timeframe — "1D" (default), "4H", "1H", "1W"
-
-        Returns:
-            Absolute path to saved screenshot
-        """
-        import os
-        import time
-
-        self._require_connection()
-        page = self._page
-
-        screenshots_dir = os.path.join("data", "screenshots")
-        os.makedirs(screenshots_dir, exist_ok=True)
-        filename = f"{symbol.replace('_', '')}_{timeframe}_{int(time.time())}.png"
-        filepath = os.path.abspath(os.path.join(screenshots_dir, filename))
-
-        try:
-            url = f"https://www.binance.com/en/trade/{symbol}"
-            await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-            await asyncio.sleep(8)
-
-            # Dismiss cookie banner
-            try:
-                await page.locator("button#onetrust-reject-all-handler").click(timeout=3_000)
-                await asyncio.sleep(1)
-            except Exception:
-                pass
-
-            # Select timeframe if not default
-            if timeframe != "1D":
-                try:
-                    tf_btn = page.locator(f"text='{timeframe}'").first
-                    await tf_btn.click(timeout=3_000)
-                    await asyncio.sleep(3)
-                except Exception:
-                    pass
-
-            # Screenshot the chart element directly — adapts to any window size
-            chart = page.locator(".kline-container").first
-            await chart.screenshot(path=filepath)
-
-            # Pad to 16:9 if needed
-            from PIL import Image
-            img = Image.open(filepath)
-            w, h = img.size
-            target_h = int(w * 9 / 16)
-            if h < target_h:
-                # Pad bottom with dark background
-                padded = Image.new("RGB", (w, target_h), color=(17, 17, 24))
-                padded.paste(img, (0, 0))
-                padded.save(filepath)
-
-            logger.info(f"Chart screenshot saved: {filepath}")
-            return filepath
-
-        except Exception as e:
-            logger.error(f"screenshot_chart: {e}, symbol={symbol}")
-            raise SDKError(f"Chart screenshot failed: {e}") from e
-
-
-class SDKError(Exception):
-    """Raised when SDK operation fails."""
-    pass

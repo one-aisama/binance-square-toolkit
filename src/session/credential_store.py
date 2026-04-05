@@ -1,7 +1,12 @@
-import json
-import aiosqlite
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timedelta
+from typing import Any
+
+import aiosqlite
+
+from src.session.credential_crypto import dump_secret, load_secret
 
 logger = logging.getLogger("bsq.session")
 
@@ -12,11 +17,18 @@ class CredentialStore:
     def __init__(self, db_path: str):
         self._db_path = db_path
 
-    async def save(self, account_id: str, cookies: dict, headers: dict,
-                   max_age_hours: float = 12.0) -> None:
+    async def save(
+        self,
+        account_id: str,
+        cookies: dict[str, Any],
+        headers: dict[str, Any],
+        max_age_hours: float = 12.0,
+    ) -> None:
         """Save or update credentials for an account (upsert)."""
         now = datetime.utcnow().isoformat()
         expires = (datetime.utcnow() + timedelta(hours=max_age_hours)).isoformat()
+        encrypted_cookies = dump_secret(cookies)
+        encrypted_headers = dump_secret(headers)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 """INSERT INTO credentials (account_id, cookies, headers, harvested_at, expires_at, valid)
@@ -27,12 +39,12 @@ class CredentialStore:
                        harvested_at = excluded.harvested_at,
                        expires_at = excluded.expires_at,
                        valid = TRUE""",
-                (account_id, json.dumps(cookies), json.dumps(headers), now, expires),
+                (account_id, encrypted_cookies, encrypted_headers, now, expires),
             )
             await db.commit()
-        logger.info(f"Credentials saved for {account_id}")
+        logger.info("Credentials saved for %s", account_id)
 
-    async def load(self, account_id: str) -> dict | None:
+    async def load(self, account_id: str) -> dict[str, Any] | None:
         """Load credentials for an account. Returns None if not found."""
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
@@ -45,8 +57,8 @@ class CredentialStore:
                 return None
             return {
                 "account_id": row["account_id"],
-                "cookies": json.loads(row["cookies"]),
-                "headers": json.loads(row["headers"]),
+                "cookies": load_secret(row["cookies"]),
+                "headers": load_secret(row["headers"]),
                 "harvested_at": row["harvested_at"],
                 "expires_at": row["expires_at"],
                 "valid": bool(row["valid"]),
@@ -60,14 +72,14 @@ class CredentialStore:
                 (account_id,),
             )
             await db.commit()
-        logger.info(f"Credentials invalidated for {account_id}")
+        logger.info("Credentials invalidated for %s", account_id)
 
     async def is_valid(self, account_id: str) -> bool:
         """Check if credentials exist and are marked valid."""
         cred = await self.load(account_id)
         if cred is None:
             return False
-        return cred["valid"]
+        return bool(cred["valid"])
 
     async def is_expired(self, account_id: str) -> bool:
         """Check if credentials have passed their expires_at time."""

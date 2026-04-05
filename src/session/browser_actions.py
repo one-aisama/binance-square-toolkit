@@ -1,7 +1,9 @@
-"""Browser-based actions via Playwright CDP.
+"""Browser-based publishing actions via Playwright CDP.
 
 Used for operations that require client-side signature (posting, reposting)
 and can't be done through pure httpx.
+
+Engagement actions (like, comment, follow, engage) live in browser_engage.py.
 """
 
 import asyncio
@@ -9,7 +11,7 @@ import logging
 import re
 from typing import Any
 
-from playwright.async_api import async_playwright, Page
+from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError, async_playwright
 
 from src.session import page_map
 from src.runtime.behavior import warm_up, mouse_move_to
@@ -18,6 +20,25 @@ logger = logging.getLogger("bsq.session")
 
 
 
+
+_REPLY_LIMIT_NEEDLES = (
+    "[710000]",
+    "limit exceeded",
+    "users without assets in their wallets are limited to a maximum of 3 replies every 7 days",
+)
+
+
+async def _detect_reply_limit(page: Page) -> str | None:
+    try:
+        body_text = await page.locator("body").inner_text(timeout=2_000)
+    except Exception:
+        return None
+
+    lowered = body_text.lower()
+    for needle in _REPLY_LIMIT_NEEDLES:
+        if needle.lower() in lowered:
+            return needle
+    return None
 
 async def _connect_browser(ws_endpoint: str) -> tuple:
     """Connect to AdsPower browser and return (playwright, browser, page).
@@ -32,14 +53,6 @@ async def _connect_browser(ws_endpoint: str) -> tuple:
     return pw, browser, page
 
 
-def _setup_page(ws_endpoint: str = None, page=None):
-    """Helper: returns (need_cleanup, page_or_None).
-    If page provided, use it. Otherwise connect via ws_endpoint.
-    """
-    if page is not None:
-        return False, None  # no cleanup needed, page already available
-    return True, None  # need to connect
-
 
 async def _get_page_or_use(ws_endpoint: str = None, *, page=None):
     """Get page: use provided page or connect to browser.
@@ -50,6 +63,163 @@ async def _get_page_or_use(ws_endpoint: str = None, *, page=None):
     pw, browser, pg = await _connect_browser(ws_endpoint)
     return pw, browser, pg, True
 
+
+def _normalize_compose_text(value: str | None) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _post_button_state_is_enabled(
+    *,
+    aria_disabled: str | None,
+    disabled_attr: str | None,
+    class_name: str | None,
+) -> bool:
+    if str(aria_disabled or "").strip().lower() in {"true", "1"}:
+        return False
+    if disabled_attr is not None:
+        return False
+    lowered = str(class_name or "").lower()
+    return "disabled" not in lowered and "inactive" not in lowered
+
+
+def _ui_indicates_post_success(
+    *,
+    current_url: str,
+    editor_text: str | None,
+    original_text: str,
+    button_enabled: bool,
+) -> bool:
+    if "/square/post/" in str(current_url or "").lower():
+        return True
+
+    normalized_editor = _normalize_compose_text(editor_text)
+    normalized_original = _normalize_compose_text(original_text)
+    if normalized_editor and normalized_original:
+        marker = normalized_original[:80]
+        if marker and marker in normalized_editor:
+            return False
+    return not normalized_editor and not button_enabled
+
+
+async def _locator_is_enabled(locator: Any) -> bool:
+    try:
+        if await locator.is_enabled():
+            return True
+    except Exception:
+        pass
+
+    try:
+        aria_disabled = await locator.get_attribute("aria-disabled")
+    except Exception:
+        aria_disabled = None
+    try:
+        disabled_attr = await locator.get_attribute("disabled")
+    except Exception:
+        disabled_attr = None
+    try:
+        class_name = await locator.get_attribute("class")
+    except Exception:
+        class_name = None
+
+    return _post_button_state_is_enabled(
+        aria_disabled=aria_disabled,
+        disabled_attr=disabled_attr,
+        class_name=class_name,
+    )
+
+
+async def _resolve_post_button(page: Page) -> Any:
+    buttons = page.locator(page_map.COMPOSE_INLINE_POST_BUTTON)
+    try:
+        count = await buttons.count()
+    except Exception:
+        count = 0
+
+    visible_candidates: list[Any] = []
+    for index in range(max(count - 1, 0), -1, -1):
+        button = buttons.nth(index)
+        try:
+            if not await button.is_visible():
+                continue
+        except Exception:
+            continue
+        if await _locator_is_enabled(button):
+            return button
+        visible_candidates.append(button)
+
+    return visible_candidates[0] if visible_candidates else buttons.first
+
+
+async def _wait_for_post_button_ready(button: Any, *, timeout_ms: int = 30_000) -> None:
+    deadline = asyncio.get_running_loop().time() + (timeout_ms / 1000)
+    while asyncio.get_running_loop().time() < deadline:
+        try:
+            await button.scroll_into_view_if_needed()
+        except Exception:
+            pass
+        if await _locator_is_enabled(button):
+            return
+        await asyncio.sleep(0.5)
+    raise TimeoutError(f"Post button did not become enabled within {timeout_ms}ms")
+
+
+async def _get_compose_editor_text(page: Page) -> str:
+    editor = page.locator(page_map.COMPOSE_EDITOR).first
+    try:
+        return await editor.inner_text(timeout=1_000)
+    except Exception:
+        try:
+            return (await editor.text_content()) or ""
+        except Exception:
+            return ""
+
+
+def _extract_post_id_from_url(url: str) -> str:
+    match = re.search(r"/square/post/(\d+)", str(url or ""))
+    return match.group(1) if match else ""
+
+
+async def _post_submission_looks_confirmed(page: Page, *, original_text: str) -> tuple[bool, str]:
+    editor_text = await _get_compose_editor_text(page)
+    button = await _resolve_post_button(page)
+    button_enabled = await _locator_is_enabled(button)
+    confirmed = _ui_indicates_post_success(
+        current_url=page.url,
+        editor_text=editor_text,
+        original_text=original_text,
+        button_enabled=button_enabled,
+    )
+    return confirmed, _extract_post_id_from_url(page.url)
+
+
+async def _click_post_and_wait_for_response(
+    page: Page,
+    *,
+    button: Any,
+    timeout_ms: int,
+    dom_fallback: bool = False,
+) -> dict[str, Any] | None:
+    try:
+        async with page.expect_response(lambda response: "content/add" in response.url, timeout=timeout_ms) as response_info:
+            await button.scroll_into_view_if_needed()
+            try:
+                await button.hover()
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+            if dom_fallback:
+                await button.evaluate("(node) => node.click()")
+            else:
+                await button.click()
+
+        response = await response_info.value
+        try:
+            payload = await response.json()
+        except Exception:
+            payload = {"success": response.status == 200, "status": response.status, "url": response.url}
+        return payload
+    except PlaywrightTimeoutError:
+        return None
 
 async def _type_with_hashtag_handling(page: Page, text: str, delay: int = 60):
     """Type text handling #hashtag and $CASHTAG autocomplete popups.
@@ -89,86 +259,101 @@ async def create_post(
     *,
     page=None,
 ) -> dict[str, Any]:
-    """Create a post on Binance Square via browser automation.
-
-    Args:
-        ws_endpoint: WebSocket endpoint from AdsPower
-        text: Post text content (use $BTC not Bitcoin)
-        coin: Optional coin ticker to attach chart (e.g. "BTC", "ETH")
-        sentiment: Optional "bullish" or "bearish" to set price expectation
-        image_path: Optional local file path to attach image
-
-    Returns:
-        dict with success status and any captured post data
-    """
+    """Create a post on Binance Square via browser automation."""
     pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
 
     try:
+        # coin + image_path allowed: image attached, chart card skipped, coin tag still works
+
         logger.info("Navigating to Binance Square...")
         await page.goto(page_map.SQUARE_URL, wait_until="domcontentloaded", timeout=60_000)
         await asyncio.sleep(5)
         await warm_up(page)
 
-        # 1. Click editor to focus
         editor = page.locator(page_map.COMPOSE_EDITOR).first
         await editor.wait_for(state="visible", timeout=15_000)
         await asyncio.sleep(1)
         await editor.click()
         await asyncio.sleep(1)
 
-        # 2. Type text (slow, human-like) — MUST be first
         await _type_with_hashtag_handling(page, text, delay=60)
         await asyncio.sleep(2)
 
-        # 3. Attach image if specified — BEFORE chart (order matters!)
         if image_path:
             await _attach_image_inline(page, image_path)
 
-        # 4. Add chart if coin specified — AFTER text and image
-        if coin:
+        # Add chart card only if no custom image (coin tag still works with image)
+        if coin and not image_path:
             await _add_chart(page, coin)
 
-        # 5. Set sentiment if specified
         if sentiment:
             await _set_sentiment(page, sentiment)
 
-        # 6. Set up response capture
-        post_response = None
-
-        async def capture_post(response):
-            nonlocal post_response
-            if "content/add" in response.url and response.status == 200:
-                try:
-                    post_response = await response.json()
-                except Exception:
-                    pass
-
-        page.on("response", capture_post)
-
-        # 7. Click inline Post button
         await asyncio.sleep(2)
-        post_btn = page.locator(page_map.COMPOSE_INLINE_POST_BUTTON).first
-        await post_btn.wait_for(state="visible", timeout=5_000)
-        await mouse_move_to(page, page_map.COMPOSE_INLINE_POST_BUTTON)
-        await asyncio.sleep(1)
-        await post_btn.click()
-        await asyncio.sleep(10)
+        post_btn = await _resolve_post_button(page)
+        await _wait_for_post_button_ready(post_btn)
+
+        post_response = await _click_post_and_wait_for_response(
+            page,
+            button=post_btn,
+            timeout_ms=15_000,
+        )
+
+        if not post_response:
+            confirmed, post_id = await _post_submission_looks_confirmed(page, original_text=text)
+            if confirmed:
+                logger.info("Post created via UI confirmation%s", f": {post_id}" if post_id else "")
+                return {
+                    "success": True,
+                    "post_id": post_id,
+                    "response": {"success": True, "confirmation": "ui_state"},
+                }
+
+            logger.warning("Primary post click produced no publish response; retrying with DOM click")
+            retry_btn = await _resolve_post_button(page)
+            await _wait_for_post_button_ready(retry_btn, timeout_ms=5_000)
+            post_response = await _click_post_and_wait_for_response(
+                page,
+                button=retry_btn,
+                timeout_ms=15_000,
+                dom_fallback=True,
+            )
 
         if post_response and post_response.get("success"):
-            post_id = post_response.get("data", {}).get("id", "")
+            post_id = str(post_response.get("data", {}).get("id", "") or _extract_post_id_from_url(page.url))
             logger.info(f"Post created: {post_id}")
-            return {"success": True, "post_id": str(post_id), "response": post_response}
-        elif post_response:
-            return {"success": False, "error": post_response.get("message", "Unknown"), "response": post_response}
-        else:
-            return {"success": True, "post_id": "", "note": "No response captured"}
+            return {"success": True, "post_id": post_id, "response": post_response}
+        if post_response:
+            return {
+                "success": False,
+                "error": post_response.get("message", "Unknown"),
+                "response": post_response,
+            }
+
+        for _ in range(10):
+            confirmed, post_id = await _post_submission_looks_confirmed(page, original_text=text)
+            if confirmed:
+                logger.info("Post created via delayed UI confirmation%s", f": {post_id}" if post_id else "")
+                return {
+                    "success": True,
+                    "post_id": post_id,
+                    "response": {"success": True, "confirmation": "ui_state_delayed"},
+                }
+            await asyncio.sleep(1)
+
+        logger.error("Post submission could not be confirmed from network responses")
+        return {
+            "success": False,
+            "error": "Post submission could not be confirmed",
+            "error_code": "publish_unconfirmed",
+        }
 
     except Exception as e:
         logger.error(f"Post creation failed: {e}")
         return {"success": False, "error": str(e)}
     finally:
         if _cleanup and pw:
-                await pw.stop()
+            await pw.stop()
 
 
 async def _add_chart(page: Page, coin: str):
@@ -341,7 +526,7 @@ async def create_article(
         return {"success": False, "error": str(e)}
     finally:
         if _cleanup and pw:
-                await pw.stop()
+            await pw.stop()
 
 
 async def repost(ws_endpoint: str = None, post_id: str = "", comment: str = "", *, page=None) -> dict[str, Any]:
@@ -395,936 +580,9 @@ async def repost(ws_endpoint: str = None, post_id: str = "", comment: str = "", 
         return {"success": False, "error": str(e)}
     finally:
         if _cleanup and pw:
-                await pw.stop()
+            await pw.stop()
 
 
-async def comment_on_post(ws_endpoint: str = None, post_id: str = "", comment_text: str = "", *, page=None) -> dict[str, Any]:
-    """Comment on a post. Handles 'Follow & Reply' popup if author restricts comments to followers.
 
-    Flow:
-    1. Navigate to post
-    2. Scroll to reply input (input[placeholder="Post your reply"])
-    3. Type comment (delay=60ms per char)
-    4. Click Reply button
-    5. If "Follow & Reply" popup appears -> click it (auto-follows + sends comment)
-    6. If no popup -> comment sent directly
-
-    IMPORTANT: Do NOT write comment again after "Follow & Reply" — the original text is already sent.
-    """
-    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
-
-    try:
-        post_url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
-        logger.info(f"Navigating to post for comment: {post_url}")
-        await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
-        await asyncio.sleep(5)
-        await warm_up(page)
-
-        # Scroll down to make reply input visible
-        await page.evaluate("window.scrollBy(0, 800)")
-        await asyncio.sleep(2)
-
-        # Try regular post reply input first, fallback to ProseMirror (comment pages)
-        reply_input = page.locator(page_map.POST_REPLY_INPUT).first
-        use_prosemirror = False
-
-        try:
-            await reply_input.wait_for(state="visible", timeout=3_000)
-            await reply_input.scroll_into_view_if_needed()
-            await asyncio.sleep(1)
-            await reply_input.click()
-            await asyncio.sleep(1)
-        except Exception:
-            # Comment detail pages use ProseMirror editor instead of plain input
-            logger.info("Regular reply input not found, trying ProseMirror editor (comment page)")
-            editor = page.locator(page_map.COMMENT_REPLY_EDITOR).first
-            await editor.scroll_into_view_if_needed()
-            await asyncio.sleep(1)
-            await editor.click()
-            await asyncio.sleep(1)
-            use_prosemirror = True
-
-        # Type comment via keyboard (both input types work with keyboard.type)
-        await page.keyboard.type(comment_text, delay=60)
-        await asyncio.sleep(2)
-
-        # Click Reply
-        reply_btn = page.locator(page_map.POST_REPLY_BUTTON).first
-        await mouse_move_to(page, page_map.POST_REPLY_BUTTON)
-        await reply_btn.click()
-        await asyncio.sleep(3)
-
-        # Check if "Follow & Reply" popup appeared
-        follow_reply_btn = page.locator(page_map.POST_FOLLOW_REPLY_POPUP).first
-        try:
-            await follow_reply_btn.wait_for(state="visible", timeout=3_000)
-            # Popup appeared — click it. This auto-follows AND sends the comment.
-            logger.info("Follow & Reply popup detected, clicking...")
-            await follow_reply_btn.click()
-            await asyncio.sleep(5)
-            logger.info(f"Comment sent (via Follow & Reply) on post {post_id}")
-            return {"success": True, "post_id": post_id, "followed": True}
-        except Exception:
-            # No popup — comment was sent directly
-            await asyncio.sleep(3)
-            logger.info(f"Comment sent on post {post_id}")
-            return {"success": True, "post_id": post_id, "followed": False}
-
-    except Exception as e:
-        logger.error(f"Comment failed on post {post_id}: {e}")
-        return {"success": False, "error": str(e)}
-    finally:
-        if _cleanup and pw:
-                await pw.stop()
-
-
-async def engage_post(
-    ws_endpoint: str = None,
-    post_id: str = "",
-    like: bool = True,
-    comment_text: str | None = None,
-    follow: bool = False,
-    *,
-    page=None,
-) -> dict[str, Any]:
-    """Engage with a post in a single visit: like + comment + follow.
-
-    Opens the post page once, performs all requested actions, then moves on.
-    Much more efficient than calling like_post + comment_on_post separately.
-
-    Args:
-        ws_endpoint: CDP websocket (optional if page provided)
-        post_id: Target post ID
-        like: Whether to like the post (default True)
-        comment_text: Comment to leave (None = skip commenting)
-        follow: Whether to follow the author (default False)
-        page: Persistent page from SDK session
-
-    Returns:
-        {success, liked, commented, followed, post_id, errors: []}
-    """
-    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
-    result = {
-        "success": True,
-        "liked": False,
-        "commented": False,
-        "followed": False,
-        "post_id": post_id,
-        "errors": [],
-    }
-
-    try:
-        post_url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
-        logger.info(f"Engaging with post {post_id}")
-        await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
-        await asyncio.sleep(5)
-        await warm_up(page)
-
-        # 1. Like
-        if like:
-            try:
-                detail_like = page.locator(page_map.COMMENT_DETAIL_LIKE).first
-                card_like = page.locator(page_map.POST_LIKE_BUTTON).first
-
-                try:
-                    await detail_like.wait_for(state="visible", timeout=3_000)
-                    await detail_like.scroll_into_view_if_needed()
-                    await mouse_move_to(page, page_map.COMMENT_DETAIL_LIKE)
-                    await asyncio.sleep(1)
-                    await detail_like.click()
-                except Exception:
-                    await card_like.wait_for(state="visible", timeout=10_000)
-                    await card_like.scroll_into_view_if_needed()
-                    await mouse_move_to(page, page_map.POST_LIKE_BUTTON)
-                    await asyncio.sleep(1)
-                    await card_like.click()
-
-                result["liked"] = True
-                logger.info(f"Liked post {post_id}")
-                await asyncio.sleep(2)
-            except Exception as e:
-                result["errors"].append(f"like: {e}")
-                logger.warning(f"Like failed on {post_id}: {e}")
-
-        # 2. Comment
-        if comment_text:
-            try:
-                await page.evaluate("window.scrollBy(0, 800)")
-                await asyncio.sleep(2)
-
-                reply_input = page.locator(page_map.POST_REPLY_INPUT).first
-                await reply_input.scroll_into_view_if_needed()
-                await asyncio.sleep(1)
-                await reply_input.click()
-                await asyncio.sleep(1)
-                await page.keyboard.type(comment_text, delay=60)
-                await asyncio.sleep(2)
-
-                await mouse_move_to(page, page_map.POST_REPLY_BUTTON)
-                reply_btn = page.locator(page_map.POST_REPLY_BUTTON).first
-                await reply_btn.click()
-                await asyncio.sleep(3)
-
-                # Check for Follow & Reply popup
-                follow_reply_btn = page.locator(page_map.POST_FOLLOW_REPLY_POPUP).first
-                try:
-                    await follow_reply_btn.wait_for(state="visible", timeout=3_000)
-                    await follow_reply_btn.click()
-                    await asyncio.sleep(5)
-                    result["followed"] = True
-                    logger.info(f"Comment sent via Follow & Reply on {post_id}")
-                except Exception:
-                    await asyncio.sleep(3)
-                    logger.info(f"Comment sent on {post_id}")
-
-                result["commented"] = True
-            except Exception as e:
-                result["errors"].append(f"comment: {e}")
-                logger.warning(f"Comment failed on {post_id}: {e}")
-
-        # 3. Follow (only if not already followed via popup)
-        if follow and not result["followed"]:
-            try:
-                follow_btn = page.locator(page_map.FOLLOW_BUTTON).first
-                btn_text = await follow_btn.text_content(timeout=3_000)
-                if btn_text and "Following" not in btn_text:
-                    await mouse_move_to(page, page_map.FOLLOW_BUTTON)
-                    await follow_btn.click()
-                    await asyncio.sleep(3)
-                    result["followed"] = True
-                    logger.info(f"Followed author of {post_id}")
-                else:
-                    logger.info(f"Already following author of {post_id}")
-            except Exception as e:
-                result["errors"].append(f"follow: {e}")
-                logger.warning(f"Follow failed on {post_id}: {e}")
-
-        result["success"] = len(result["errors"]) == 0
-        return result
-
-    except Exception as e:
-        logger.error(f"engage_post failed on {post_id}: {e}")
-        return {"success": False, "post_id": post_id, "error": str(e), "errors": [str(e)]}
-    finally:
-        if _cleanup and pw:
-                await pw.stop()
-
-
-async def follow_author(ws_endpoint: str = None, post_id: str = "", *, page=None) -> dict[str, Any]:
-    """Follow the author of a post. Checks if already following first.
-
-    Flow:
-    1. Navigate to post
-    2. Find Follow button
-    3. Check button text — if "Following" or "Unfollow", skip (already following)
-    4. If "Follow" — click it
-
-    IMPORTANT: If button says "Following", do NOT click — it will UNFOLLOW.
-    """
-    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
-
-    try:
-        post_url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
-        logger.info(f"Navigating to post for follow: {post_url}")
-        await page.goto(post_url, wait_until="domcontentloaded", timeout=60_000)
-        await asyncio.sleep(5)
-        await warm_up(page)
-
-        # Find Follow button
-        follow_btn = page.locator(page_map.FOLLOW_BUTTON).first
-        try:
-            await follow_btn.wait_for(state="visible", timeout=5_000)
-        except Exception:
-            logger.info(f"No Follow button found on post {post_id} (may be own post)")
-            return {"success": True, "post_id": post_id, "action": "skipped", "reason": "no_button"}
-
-        # Check button text — "Following" means already subscribed
-        btn_text = (await follow_btn.text_content() or "").strip()
-        if btn_text in ("Following", "Unfollow"):
-            logger.info(f"Already following author of post {post_id}")
-            return {"success": True, "post_id": post_id, "action": "already_following"}
-
-        # Safe to click — button says "Follow"
-        await mouse_move_to(page, page_map.FOLLOW_BUTTON)
-        await follow_btn.click()
-        await asyncio.sleep(3)
-        logger.info(f"Followed author of post {post_id}")
-        return {"success": True, "post_id": post_id, "action": "followed"}
-
-    except Exception as e:
-        logger.error(f"Follow failed on post {post_id}: {e}")
-        return {"success": False, "error": str(e)}
-    finally:
-        if _cleanup and pw:
-                await pw.stop()
-
-
-async def _extract_post_text(page: Page) -> str:
-    """Extract clean post text from page using precise selectors.
-
-    Uses #articleBody .richtext-container (works for both posts and articles).
-    Falls back to .richtext-container if #articleBody not found.
-    """
-    return await page.evaluate(r'''() => {
-        const container = document.querySelector('#articleBody .richtext-container')
-                       || document.querySelector('.richtext-container');
-        if (!container) return '';
-        return container.innerText.trim();
-    }''')
-
-
-async def _extract_author_name(page: Page) -> str:
-    """Extract author name from post page."""
-    return await page.evaluate(r'''() => {
-        const els = document.querySelectorAll('a[href*="/square/profile/"]');
-        for (const el of els) {
-            const t = (el.innerText || '').trim();
-            if (t && t.length > 1 && t.length < 40) return t;
-        }
-        return '';
-    }''')
-
-
-async def collect_feed_posts(
-    ws_endpoint: str = None,
-    count: int = 20,
-    tab: str = "recommended",
-    *,
-    page=None,
-) -> list[dict[str, Any]]:
-    """Collect posts from Binance Square feed in ONE pass from DOM.
-
-    No navigation to individual posts — everything parsed from the feed page.
-    Fast: scrolls feed, extracts post_id + author + text + likes from cards.
-
-    Args:
-        ws_endpoint: WebSocket endpoint from AdsPower
-        count: Target number of posts to collect
-        tab: Feed tab — "recommended" or "following"
-
-    Returns:
-        List of dicts: {post_id, author, text, like_count}
-    """
-    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
-
-    try:
-        logger.info("Collecting feed posts...")
-        await page.goto(page_map.SQUARE_URL, wait_until="domcontentloaded", timeout=60_000)
-        await asyncio.sleep(5)
-
-        # Click tab on the current Square UI (<div class="tab-item">).
-        label = "Recommended" if tab == "recommended" else "Following"
-        tab_selector = page_map.FEED_RECOMMENDED_TAB if tab == "recommended" else page_map.FEED_FOLLOWING_TAB
-        tab_switched = False
-        try:
-            await page.wait_for_function('() => !!document.querySelector(".tab-item")', timeout=10_000)
-            current_active = await page.evaluate(r'''(label) => {
-                const items = Array.from(document.querySelectorAll('.tab-item'));
-                const match = items.find(el => (el.innerText || '').trim() === label);
-                return !!match && match.classList.contains('active');
-            }''', label)
-
-            if current_active:
-                tab_switched = True
-            else:
-                try:
-                    tab_el = page.locator(tab_selector).first
-                    await tab_el.wait_for(state="visible", timeout=3_000)
-                    await tab_el.scroll_into_view_if_needed()
-                    await tab_el.click(timeout=3_000)
-                    tab_switched = True
-                except Exception:
-                    tab_switched = await page.evaluate(r'''(label) => {
-                        const items = Array.from(document.querySelectorAll('.tab-item'));
-                        const match = items.find(el => (el.innerText || '').trim() === label);
-                        if (!match) return false;
-                        match.click();
-                        return true;
-                    }''', label)
-
-            if tab_switched:
-                try:
-                    await page.wait_for_function(r'''(label) => {
-                        const items = Array.from(document.querySelectorAll('.tab-item'));
-                        const match = items.find(el => (el.innerText || '').trim() === label);
-                        return !!match && match.classList.contains('active');
-                    }''', label, timeout=5_000)
-                except Exception:
-                    await asyncio.sleep(2)
-                else:
-                    await asyncio.sleep(3)
-        except Exception:
-            tab_switched = False
-
-        if not tab_switched:
-            logger.warning(f"{tab} tab not found, using current feed")
-
-        # Scroll to load posts
-        scrolls = max(3, count // 3)
-        for _ in range(scrolls):
-            await page.mouse.wheel(0, 800)
-            await asyncio.sleep(2)
-
-        # Parse all posts from DOM in ONE JS pass — no navigation
-        results = await page.evaluate(r'''(maxCount) => {
-            const cards = document.querySelectorAll('.feed-buzz-card-base-view');
-            const posts = [];
-            const seen = new Set();
-
-            for (const card of cards) {
-                if (posts.length >= maxCount) break;
-
-                // Get post_id from link
-                const link = card.querySelector('a[href*="/square/post/"]');
-                if (!link) continue;
-                const href = link.getAttribute('href') || '';
-                const match = href.match(/\/post\/(\d+)/);
-                if (!match) continue;
-                const postId = match[1];
-                if (seen.has(postId)) continue;
-                seen.add(postId);
-
-                // Get author
-                const nickEl = card.querySelector('.nick-username a.nick');
-                const author = nickEl ? nickEl.textContent.trim() : 'Unknown';
-
-                // Get text from card body
-                const bodyEl = card.querySelector('.card__bd');
-                const text = bodyEl ? bodyEl.innerText.trim() : '';
-                if (text.length < 30) continue;
-
-                // Get like count
-                const likeEl = card.querySelector('.thumb-up-button');
-                let likeCount = 0;
-                if (likeEl) {
-                    const likeText = likeEl.innerText.trim();
-                    const num = likeText.replace(/[^0-9.kKmM]/g, '');
-                    if (num.toLowerCase().includes('k')) {
-                        likeCount = Math.round(parseFloat(num) * 1000);
-                    } else if (num.toLowerCase().includes('m')) {
-                        likeCount = Math.round(parseFloat(num) * 1000000);
-                    } else {
-                        likeCount = parseInt(num) || 0;
-                    }
-                }
-
-                posts.push({
-                    post_id: postId,
-                    author: author,
-                    text: text.substring(0, 1000),
-                    like_count: likeCount,
-                });
-            }
-            return posts;
-        }''', count)
-
-        logger.info(f"Collected {len(results)} posts from feed (DOM parse, no navigation)")
-        return results
-
-    except Exception as e:
-        logger.error(f"Feed collection failed: {e}")
-        return []
-    finally:
-        if _cleanup and pw:
-                await pw.stop()
-
-
-async def get_user_profile(ws_endpoint: str = None, username: str = "", *, page=None) -> dict[str, Any]:
-    """Fetch public profile data for a Binance Square user.
-
-    Args:
-        ws_endpoint: CDP websocket endpoint
-        username: Binance Square username (from profile URL)
-
-    Returns:
-        {username, name, bio, following, followers, liked, shared,
-         is_following, recent_posts: [{post_id, text_preview}]}
-    """
-    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
-
-    try:
-        url = f"https://www.binance.com/en/square/profile/{username}"
-        await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-        await asyncio.sleep(5)
-
-        profile = await page.evaluate(r'''(username) => {
-            const result = {username: username};
-            const lines = document.body.innerText.split('\n').map(l => l.trim()).filter(l => l);
-
-            // Find name — usually first substantial text or h1
-            const h1 = document.querySelector('h1');
-            result.name = h1 ? h1.innerText.trim() : '';
-
-            // Parse stats by finding label positions
-            const labelMap = {};
-            for (let i = 0; i < lines.length; i++) {
-                const l = lines[i];
-                if (['Following', 'Followers', 'Liked', 'Shared', 'Posts'].includes(l)) {
-                    labelMap[l] = i;
-                }
-            }
-
-            // Number before "Following" = following count
-            if (labelMap['Following'] !== undefined) {
-                result.following = lines[labelMap['Following'] - 1] || '0';
-            }
-
-            // Number before "Followers" = followers count (line between Following and Followers)
-            if (labelMap['Followers'] !== undefined) {
-                result.followers = lines[labelMap['Followers'] - 1] || '0';
-            }
-
-            // Number before "Liked"
-            if (labelMap['Liked'] !== undefined) {
-                result.liked = lines[labelMap['Liked'] - 1] || '0';
-            }
-
-            // Number before "Shared"
-            if (labelMap['Shared'] !== undefined) {
-                result.shared = lines[labelMap['Shared'] - 1] || '0';
-            }
-
-            // Bio: look for description text between name area and stats
-            // Usually a line with @ mention before Following count
-            const followingIdx = labelMap['Following'] || 20;
-            for (let i = 2; i < followingIdx - 1; i++) {
-                const line = lines[i];
-                if (line.startsWith('@')) {
-                    result.handle = line;
-                } else if (line.length > 30 && !line.startsWith('http') &&
-                           line !== result.name && !line.startsWith('@')) {
-                    result.bio = (result.bio || '') + line + ' ';
-                }
-            }
-            result.bio = (result.bio || '').trim();
-
-            // Follow button state
-            const btns = document.querySelectorAll('button');
-            result.is_following = false;
-            for (const btn of btns) {
-                const t = btn.innerText.trim();
-                if (t === 'Following' || t === 'Unfollow') {
-                    result.is_following = true;
-                    break;
-                }
-            }
-
-            // Recent post IDs
-            const postLinks = document.querySelectorAll('a[href*="/square/post/"]');
-            const seen = new Set();
-            result.recent_posts = [];
-            postLinks.forEach(a => {
-                const href = a.getAttribute('href') || '';
-                const parts = href.split('/');
-                const id = parts[parts.length - 1];
-                if (id && /^\d+$/.test(id) && !seen.has(id)) {
-                    seen.add(id);
-                    // Get nearby text as preview
-                    const parent = a.closest('div');
-                    const preview = parent ? parent.innerText.substring(0, 100).trim() : '';
-                    result.recent_posts.push({post_id: id, text_preview: preview});
-                }
-            });
-
-            return result;
-        }''', username)
-
-        logger.info(
-            f"Profile fetched: {profile.get('name', username)}, "
-            f"followers={profile.get('followers', '?')}, "
-            f"posts={len(profile.get('recent_posts', []))}"
-        )
-        return profile
-
-    except Exception as e:
-        logger.error(f"get_user_profile: {e}, username={username}")
-        return {"username": username, "error": str(e)}
-    finally:
-        if _cleanup and pw:
-                await pw.stop()
-
-
-async def get_post_comments(ws_endpoint: str = None, post_id: str = "", limit: int = 20, *, page=None) -> list[dict[str, Any]]:
-    """Fetch comments on a specific post using feed-buzz-card selectors.
-
-    Navigates to post page, scrolls to load comments, and extracts
-    author + text for each comment card.
-
-    Args:
-        ws_endpoint: CDP websocket endpoint
-        post_id: Post ID
-        limit: Max comments to return (default 20)
-
-    Returns:
-        [{author, author_handle, text}]
-    """
-    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
-
-    try:
-        url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
-        await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-        await asyncio.sleep(5)
-
-        # Scroll to load comments
-        for _ in range(4):
-            await page.evaluate("window.scrollBy(0, 600)")
-            await asyncio.sleep(2)
-
-        comments = await page.evaluate(r'''(limit) => {
-            const cards = document.querySelectorAll('.feed-buzz-card-base-view');
-            const results = [];
-            // Skip first card (it's the main post, not a comment)
-            for (let i = 1; i < cards.length && results.length < limit; i++) {
-                const card = cards[i];
-                const nickEl = card.querySelector('.nick-username a.nick');
-                const bodyEl = card.querySelector('.card__bd');
-                if (!nickEl) continue;
-
-                const author = nickEl.textContent.trim();
-                const href = nickEl.getAttribute('href') || '';
-                const handleMatch = href.match(/profile\/([^?/]+)/);
-                const text = bodyEl
-                    ? bodyEl.innerText.trim().substring(0, 300)
-                    : '';
-
-                results.push({
-                    author: author,
-                    author_handle: handleMatch ? handleMatch[1] : '',
-                    text: text,
-                });
-            }
-            return results;
-        }''', limit)
-
-        logger.info(f"get_post_comments: {len(comments)} comments on post {post_id}")
-        return comments
-
-    except Exception as e:
-        logger.error(f"get_post_comments: {e}, post_id={post_id}")
-        return []
-    finally:
-        if _cleanup and pw:
-                await pw.stop()
-
-
-async def get_my_comment_replies(
-    ws_endpoint: str = None, username: str = "your-username", max_replies: int = 5, *, page=None
-) -> list[dict[str, Any]]:
-    """Find replies to agent's comments by checking the profile Replies tab.
-
-    Rewritten flow (no back-and-forth navigation):
-    1. Navigate to profile → Replies tab
-    2. ONE JS pass: collect post_ids + comment text for cards with replies
-    3. For each post_id, navigate directly by URL and read replies
-    No returning to profile between cards.
-
-    Args:
-        ws_endpoint: CDP websocket endpoint
-        username: Agent's Binance Square username
-        max_replies: Maximum number of reply cards to process (default 5)
-
-    Returns:
-        [{comment_text, comment_post_id, reply_count, replies: [{author, author_handle, text}]}]
-    """
-    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
-
-    try:
-        profile_url = f"https://www.binance.com/en/square/profile/{username}"
-        await page.goto(profile_url, wait_until="domcontentloaded", timeout=60_000)
-        await asyncio.sleep(5)
-
-        # Click Replies tab
-        replies_tab = page.locator("div.category:has-text('Replies')").first
-        await replies_tab.click()
-        await asyncio.sleep(4)
-
-        # Scroll to load (limited)
-        for _ in range(2):
-            await page.evaluate("window.scrollBy(0, 700)")
-            await asyncio.sleep(2)
-
-        # ONE pass: collect post_ids from card links + comment count
-        # Each reply card has a link to the post. Extract it from href.
-        cards_data = await page.evaluate(r'''(username) => {
-            const cards = document.querySelectorAll('.feed-buzz-card-base-view');
-            const results = [];
-
-            for (const card of cards) {
-                const nickEl = card.querySelector('.nick-username a.nick');
-                if (!nickEl) continue;
-                const author = nickEl.textContent.trim();
-                if (author !== username) continue;
-
-                // Check comment count
-                const commentIcon = card.querySelector('.comments-icon');
-                const countText = commentIcon ? commentIcon.innerText.trim() : '0';
-                const count = parseInt(countText) || 0;
-                if (count === 0) continue;
-
-                // Get post_id from card link
-                const link = card.querySelector('a[href*="/square/post/"]');
-                if (!link) continue;
-                const href = link.getAttribute('href') || '';
-                const match = href.match(/\/post\/(\d+)/);
-                if (!match) continue;
-
-                // Get our comment text
-                const bodyEl = card.querySelector('.card__bd');
-                const text = bodyEl ? bodyEl.innerText.trim().substring(0, 200) : '';
-
-                results.push({
-                    post_id: match[1],
-                    comment_text: text,
-                    reply_count: count,
-                });
-            }
-            return results;
-        }''', username)
-
-        logger.info(f"get_my_comment_replies: found {len(cards_data)} comments with replies")
-
-        if not cards_data:
-            return []
-
-        # Now visit each post directly by URL (no returning to profile)
-        results = []
-        for card in cards_data[:max_replies]:
-            post_id = card["post_id"]
-            try:
-                url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
-                await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-                await asyncio.sleep(4)
-
-                # Scroll to load replies
-                for _ in range(2):
-                    await page.evaluate("window.scrollBy(0, 500)")
-                    await asyncio.sleep(1.5)
-
-                # Read reply cards (skip first card = our comment)
-                replies = await page.evaluate(r'''() => {
-                    const cards = document.querySelectorAll('.feed-buzz-card-base-view');
-                    const results = [];
-                    for (let i = 1; i < cards.length; i++) {
-                        const card = cards[i];
-                        const nickEl = card.querySelector('.nick-username a.nick');
-                        const bodyEl = card.querySelector('.card__bd');
-                        if (!nickEl) continue;
-
-                        const author = nickEl.textContent.trim();
-                        const href = nickEl.getAttribute('href') || '';
-                        const handleMatch = href.match(/profile\/([^?/]+)/);
-                        const text = bodyEl
-                            ? bodyEl.innerText.trim().substring(0, 300)
-                            : '';
-
-                        if (text) {
-                            results.push({
-                                author: author,
-                                author_handle: handleMatch ? handleMatch[1] : '',
-                                text: text,
-                            });
-                        }
-                    }
-                    return results;
-                }''')
-
-                results.append({
-                    "comment_text": card["comment_text"],
-                    "comment_post_id": post_id,
-                    "reply_count": card["reply_count"],
-                    "replies": replies,
-                })
-
-                logger.info(
-                    f"Comment '{card['comment_text'][:40]}...' has "
-                    f"{len(replies)} replies at post {post_id}"
-                )
-
-            except Exception as e:
-                logger.error(f"get_my_comment_replies: error on post {post_id}: {e}")
-                continue
-
-        return results
-
-    except Exception as e:
-        logger.error(f"get_my_comment_replies: {e}")
-        return []
-    finally:
-        if _cleanup and pw:
-                await pw.stop()
-
-
-async def get_post_stats(ws_endpoint: str = None, post_id: str = "", *, page=None) -> dict[str, Any]:
-    """Fetch engagement stats for a specific post.
-
-    Args:
-        ws_endpoint: CDP websocket endpoint
-        post_id: Post ID
-
-    Returns:
-        {post_id, likes, comments, quotes, title_preview}
-    """
-    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
-
-    try:
-        url = page_map.POST_URL_TEMPLATE.format(post_id=post_id)
-        await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-        await asyncio.sleep(5)
-
-        stats = await page.evaluate(r'''(postId) => {
-            const result = {post_id: postId};
-
-            // Like count from thumb-up-button
-            const likeBtn = document.querySelector('div.thumb-up-button');
-            result.likes = likeBtn ? likeBtn.innerText.trim() : '0';
-
-            // Quote count from detail-quote-button
-            const quoteBtn = document.querySelector('div.detail-quote-button');
-            result.quotes = quoteBtn ? quoteBtn.innerText.trim() : '0';
-
-            // Comment count from "Replies N" text
-            const lines = document.body.innerText.split('\n').map(l => l.trim());
-            for (const line of lines) {
-                const match = line.match(/^Replies?\s+(\d[\d,.KkMm]*)/);
-                if (match) {
-                    result.comments = match[1];
-                    break;
-                }
-            }
-            if (!result.comments) result.comments = '0';
-
-            // Title/text preview
-            const content = document.querySelector('.richtext-container');
-            result.title_preview = content
-                ? content.innerText.trim().substring(0, 120)
-                : '';
-
-            return result;
-        }''', post_id)
-
-        logger.info(f"Post stats {post_id}: likes={stats.get('likes')}, comments={stats.get('comments')}")
-        return stats
-
-    except Exception as e:
-        logger.error(f"get_post_stats: {e}, post_id={post_id}")
-        return {"post_id": post_id, "error": str(e)}
-    finally:
-        if _cleanup and pw:
-                await pw.stop()
-
-
-async def get_my_stats(ws_endpoint: str = None, *, page=None) -> dict[str, Any]:
-    """Fetch own profile stats from Creator Center.
-
-    Returns:
-        {username, handle, bio, followers, following, liked, shared,
-         dashboard: {period, published, followers_gained, views, likes}}
-    """
-    pw, browser, page, _cleanup = await _get_page_or_use(ws_endpoint, page=page)
-
-    try:
-        await page.goto(
-            page_map.CREATOR_CENTER_URL,
-            wait_until="domcontentloaded",
-            timeout=60_000,
-        )
-
-        try:
-            await page.wait_for_function(
-                r'''() => {
-                    const text = document.body.innerText || '';
-                    return text.includes('Creator Dashboard')
-                        && text.includes('Following')
-                        && text.includes('Followers')
-                        && text.includes('@');
-                }''',
-                timeout=20_000,
-            )
-        except Exception:
-            await asyncio.sleep(4)
-        else:
-            await asyncio.sleep(2)
-
-        stats = await page.evaluate(r'''() => {
-            const lines = document.body.innerText.split('\n').map(l => l.trim()).filter(Boolean);
-            const result = {dashboard: {}};
-
-            const handleIdx = lines.findIndex(l => l.startsWith('@'));
-            if (handleIdx !== -1) {
-                result.handle = lines[handleIdx];
-                result.username = lines[handleIdx].replace('@', '');
-                if (handleIdx > 0) result.name = lines[handleIdx - 1];
-                const skipLabels = new Set(['Create API Key', 'Following', 'Followers', 'Liked', 'Shared']);
-                for (let i = handleIdx + 1; i < Math.min(handleIdx + 6, lines.length); i++) {
-                    const bioLine = lines[i];
-                    if (skipLabels.has(bioLine)) continue;
-                    if (bioLine.length > 10) {
-                        result.bio = bioLine;
-                        break;
-                    }
-                }
-            }
-
-            for (const label of ['Following', 'Followers', 'Liked', 'Shared']) {
-                const idx = lines.findIndex(l => l === label);
-                if (idx > 0) {
-                    result[label.toLowerCase()] = lines[idx - 1] || '0';
-                }
-            }
-
-            const dashStart = lines.findIndex(l => l === 'Creator Dashboard');
-            const dashEnd = lines.findIndex(l => l === 'My Published Content');
-            const dashLines = dashStart !== -1
-                ? lines.slice(dashStart, dashEnd !== -1 && dashEnd > dashStart ? dashEnd : lines.length)
-                : lines;
-
-            const periodLine = dashLines.find(l => l.startsWith('Period:'));
-            if (periodLine) {
-                result.dashboard.period = periodLine;
-            }
-
-            const dashLabels = {
-                'Published': 'published',
-                'Followers gained': 'followers_gained',
-                'Views': 'views',
-                'Likes': 'likes',
-                'Comments': 'comments',
-                'Shares': 'shares',
-                'Quotes': 'quotes',
-                'Live Duration': 'live_duration',
-            };
-
-            for (let i = 0; i < dashLines.length; i++) {
-                const key = dashLabels[dashLines[i]];
-                if (!key) continue;
-
-                let value = '';
-                for (let j = i + 1; j < dashLines.length; j++) {
-                    const candidate = dashLines[j];
-                    if (!candidate || dashLabels[candidate] || candidate.startsWith('Period:')) continue;
-                    value = candidate;
-                    break;
-                }
-
-                if (value) {
-                    result.dashboard[key] = value;
-                }
-            }
-
-            return result;
-        }''')
-
-        logger.info(
-            f"My stats: {stats.get('username', '?')}, "
-            f"followers={stats.get('followers', '?')}"
-        )
-        return stats
-
-    except Exception as e:
-        logger.error(f"get_my_stats: {e}")
-        return {"error": str(e)}
-    finally:
-        if _cleanup and pw:
-                await pw.stop()
 
 

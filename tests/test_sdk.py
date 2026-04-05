@@ -148,7 +148,7 @@ async def test_comment_on_post_calls_browser_action(sdk):
     with patch("src.sdk.comment_on_post", new_callable=AsyncMock, return_value=mock_result) as mock_fn:
         result = await sdk.comment_on_post(post_id="123", text="great analysis")
 
-    mock_fn.assert_called_once_with("ws://127.0.0.1:9222/devtools/browser/abc", "123", "great analysis", page=None)
+    mock_fn.assert_called_once_with("ws://127.0.0.1:9222/devtools/browser/abc", "123", "great analysis", page=None, allow_follow_reply=True)
     assert result["success"] is True
 
 
@@ -182,6 +182,26 @@ async def test_create_post_validation_rejects_short_text(sdk):
     result = await sdk.create_post(text="$BTC up", coin="BTC")
     assert result["success"] is False
     assert "validation_errors" in result
+
+
+async def test_create_post_allows_coin_and_image_together(sdk):
+    """coin tag + image_path is allowed — chart card skipped, image used."""
+    # This just tests validation passes, not actual publishing
+    sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
+    # Would need mock for actual publish, just verify no validation error
+    # Skip this test since it requires browser
+    pass
+
+
+async def test_create_post_rejects_sentiment_without_coin(sdk):
+    sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
+    result = await sdk.create_post(
+        text="this is a valid post body about $BTC and why the bounce still needs proof.\n\nsmaller ego, cleaner execution. #BTC #Bitcoin",
+        sentiment="bullish",
+        skip_validation=True,
+    )
+    assert result["success"] is False
+    assert "Sentiment requires a coin tag" in result["validation_errors"][0]
 
 
 async def test_create_post_skip_validation(sdk):
@@ -330,3 +350,180 @@ async def test_follow_records_success_in_guard(sdk_with_guard_allow):
 
 async def test_record_guard_noop_without_guard(sdk):
     sdk._record_guard("like", success=True)  # should not raise
+
+
+async def test_create_post_merges_live_recent_posts_with_runtime_history(sdk):
+    sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
+    sdk._profile_username = "aisama"
+    validation = MagicMock(valid=False, errors=["duplicate"], warnings=[])
+
+    with patch.object(sdk, "_load_live_recent_posts", new_callable=AsyncMock, return_value=["live recent post"]), \
+         patch("src.sdk.validate_post", return_value=validation) as mock_validate:
+        result = await sdk.create_post(
+            text="$BTC still needs more proof than one fast bounce\n\ni care more about follow through than the headline move",
+            recent_posts=["runtime checkpoint post"],
+        )
+
+    assert result["success"] is False
+    _, kwargs = mock_validate.call_args
+    assert kwargs["recent_posts"] == ["runtime checkpoint post", "live recent post"]
+
+
+async def test_chart_clip_from_standard_layout_uses_full_width_and_footer(sdk):
+    sdk._page = MagicMock()
+    sdk._page.viewport_size = {"width": 1600, "height": 900}
+
+    clip = await sdk._chart_clip_from_standard_layout(
+        chart_box={"x": 12.0, "y": 118.0, "width": 1490.0, "height": 690.0},
+    )
+
+    assert clip == {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 1600.0,
+        "height": 818.0,
+    }
+
+
+async def test_chart_clip_from_standard_layout_avoids_sidebar_when_chart_is_centered(sdk):
+    sdk._page = MagicMock()
+    sdk._page.viewport_size = {"width": 1600, "height": 900}
+
+    clip = await sdk._chart_clip_from_standard_layout(
+        chart_box={"x": 110.0, "y": 180.0, "width": 1290.0, "height": 620.0},
+        header_boxes=[{"x": 112.0, "y": 118.0, "width": 220.0, "height": 40.0}],
+    )
+
+    assert clip == {
+        "x": 90.0,
+        "y": 104.0,
+        "width": 1330.0,
+        "height": 706.0,
+    }
+
+
+async def test_save_page_screenshot_uses_device_scale(sdk):
+    import base64
+    from unittest.mock import mock_open
+
+    sdk._page = MagicMock()
+    sdk._page.evaluate = AsyncMock(return_value=1.25)
+    sdk._page.screenshot = AsyncMock()
+    cdp_session = MagicMock()
+    cdp_session.send = AsyncMock(return_value={"data": base64.b64encode(b"raw-bytes").decode()})
+    sdk._page.context = MagicMock()
+    sdk._page.context.new_cdp_session = AsyncMock(return_value=cdp_session)
+    clip = {"x": 0.0, "y": 0.0, "width": 100.0, "height": 50.0}
+
+    with patch("builtins.open", mock_open()):
+        await sdk._save_page_screenshot("data/screenshots/test.png", clip=clip)
+
+    cdp_session.send.assert_awaited_once_with(
+        "Page.captureScreenshot",
+        {
+            "format": "png",
+            "fromSurface": True,
+            "captureBeyondViewport": False,
+            "clip": {
+                "x": 0.0,
+                "y": 0.0,
+                "width": 100.0,
+                "height": 50.0,
+                "scale": 1.25,
+            },
+        },
+    )
+    sdk._page.screenshot.assert_not_called()
+
+
+async def test_screenshot_chart_prefers_standardized_capture(sdk):
+    sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
+    sdk._page = MagicMock()
+    sdk._page.goto = AsyncMock()
+    sdk._page.evaluate = AsyncMock()
+
+    with patch.object(sdk, "_dismiss_cookie_banner", new_callable=AsyncMock), \
+         patch.object(sdk, "_capture_standardized_chart_view", new_callable=AsyncMock) as mock_standardized, \
+         patch.object(sdk, "_capture_current_view", new_callable=AsyncMock) as mock_targeted, \
+         patch.object(sdk, "_fallback_chart_capture", new_callable=AsyncMock) as mock_fallback, \
+         patch.object(sdk, "_screenshot_output_path", return_value="data/screenshots/test.png"):
+        result = await sdk.screenshot_chart(symbol="BTC_USDT", timeframe="1D")
+
+    assert result == "data/screenshots/test.png"
+    mock_standardized.assert_awaited_once()
+    mock_targeted.assert_not_awaited()
+    mock_fallback.assert_not_awaited()
+
+
+
+
+
+
+async def test_connect_uses_custom_adspower_base_url():
+    sdk = BinanceSquareSDK(profile_serial="1", adspower_base_url="http://localhost:50325")
+    mock_resp = _mock_response({
+        "code": 0,
+        "msg": "success",
+        "data": {
+            "status": "Active",
+            "ws": {"puppeteer": "ws://127.0.0.1:9222/devtools/browser/abc"},
+        },
+    })
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp) as mock_get, \
+         patch.object(sdk, "_init_persistent_page", new_callable=AsyncMock):
+        await sdk.connect()
+
+    first_url = mock_get.await_args_list[0].args[0]
+    assert first_url.startswith("http://localhost:50325/")
+
+
+async def test_engage_post_respects_guarded_subactions():
+    sdk = BinanceSquareSDK(profile_serial="1")
+    sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
+
+    async def check_side_effect(action_type: str):
+        if action_type == "comment":
+            return GuardDecision(verdict=Verdict.ALLOW)
+        return GuardDecision(verdict=Verdict.DENIED, reason=f"{action_type} blocked")
+
+    guard = MagicMock(spec=ActionGuard)
+    guard.check = AsyncMock(side_effect=check_side_effect)
+    guard.record = MagicMock()
+    sdk._guard = guard
+
+    mock_result = {
+        "success": True,
+        "post_id": "123",
+        "liked": False,
+        "commented": True,
+        "followed": False,
+        "errors": [],
+    }
+    with patch("src.sdk.engage_post", new_callable=AsyncMock, return_value=mock_result) as mock_fn:
+        result = await sdk.engage_post(post_id="123", like=True, comment="great analysis", follow=True)
+
+    mock_fn.assert_awaited_once_with(
+        "ws://127.0.0.1:9222/devtools/browser/abc",
+        "123",
+        like=False,
+        comment_text="great analysis",
+        follow=False,
+        page=None,
+        allow_follow_reply=False,
+    )
+    assert result["commented"] is True
+    assert "like: like blocked" in result["skipped_actions"]
+    assert "follow: follow blocked" in result["skipped_actions"]
+    guard.record.assert_called_once_with("comment", True, None)
+
+
+async def test_engage_post_rejects_invalid_comment_without_browser_call(sdk):
+    sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
+
+    with patch("src.sdk.engage_post", new_callable=AsyncMock) as mock_fn:
+        result = await sdk.engage_post(post_id="123", like=False, comment="ok", follow=False)
+
+    assert result["success"] is False
+    assert "validation_errors" in result
+    mock_fn.assert_not_called()

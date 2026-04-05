@@ -87,14 +87,14 @@ class ActionGuard:
         limiter: ActionLimiter,
         limits: LimitsConfig,
         account_id: str,
-        max_session_actions: int = 30,
+        max_session_actions: int = 80,
         session_minimum: dict[str, int] | None = None,
     ):
         self._limiter = limiter
         self._limits = limits
         self._account_id = account_id
         self._max_session_actions = max_session_actions
-        self._session_minimum = session_minimum or {"like": 3, "comment": 1, "post": 1}
+        self._session_minimum = session_minimum or {"like": 20, "comment": 20, "post": 3}
 
         # Session state (in-memory, reset each session)
         self._session_action_count = 0

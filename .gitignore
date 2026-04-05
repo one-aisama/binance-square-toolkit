@@ -6,4 +6,17 @@ __pycache__/
 *.pyc
 .pytest_cache/
 _spike/
+.serena/
 .claude/settings.local.json
+
+# Account credentials — never commit
+config/accounts/*.yaml
+!config/accounts/_example.yaml
+
+# Active agent configs with real data
+config/active_agent.yaml
+config/active_agent.*.yaml
+!config/active_agent.example.yaml
+
+# Agent runtime data (auto-generated)
+agents/*/briefing_packet.md

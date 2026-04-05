@@ -2,12 +2,12 @@
 globs: [".env*", "config/accounts/*"]
 ---
 
-# Security Rules
+# Правила безопасности
 
-- NEVER commit API keys, tokens, or credentials to the repository.
-- All API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY) must be in `.env` only.
-- `.env` is in `.gitignore` — verify before committing.
-- Account YAML files in `config/accounts/` contain `adspower_profile_id` and proxy configs — treat as sensitive data.
-- Captured credentials (cookies, headers with csrftoken, fvideo-id, fvideo-token) are stored in SQLite, never in code or configs.
-- Never log full cookie values or auth headers — truncate in log messages.
-- Each account must use its own proxy and AdsPower profile — never share credentials between accounts.
+- НИКОГДА не коммитить API ключи, токены или credentials в репозиторий.
+- Все API ключи (ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY) должны быть только в `.env`.
+- `.env` в `.gitignore` — проверять перед коммитом.
+- YAML-файлы аккаунтов в `config/accounts/` содержат `adspower_profile_id` и конфиги прокси — обращаться как с чувствительными данными.
+- Захваченные credentials (cookies, headers с csrftoken, fvideo-id, fvideo-token) хранятся в SQLite, никогда в коде или конфигах.
+- Никогда не логировать полные значения cookies или auth-заголовков — обрезать в лог-сообщениях.
+- Каждый аккаунт должен использовать свой прокси и AdsPower профиль — никогда не шарить credentials между аккаунтами.

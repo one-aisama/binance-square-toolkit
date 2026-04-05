@@ -1,464 +1,471 @@
-"""Session 5 — aisama agent session script.
-Day 3+ of bearish market. Focus: comments on popular posts, build relationships,
-1 data-backed post with chart. Fix previous session bugs (market dict access, TA keys).
+"""Binance Square agent session runner.
+
+Three modes:
+  --prepare    Collect context, generate plan skeleton (no text), save to file
+  --execute    Load plan with text, re-audit, execute through SDK, commit results
+  --continuous Legacy autonomous loop (delegates to ContinuousSessionRunner)
 """
 
+from __future__ import annotations
+
+import argparse
 import asyncio
-import logging
 import json
+import logging
 import random
+from pathlib import Path
+from typing import Any
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-logger = logging.getLogger("aisama.session5")
+from dotenv import load_dotenv
+
+from src.db.database import get_db_path, init_db
+from src.metrics.store import init_metrics_tables
+from src.runtime.agent_config import load_active_agent
+from src.runtime.comment_coordination import cleanup_expired_comment_locks
+from src.runtime.cycle_policy import build_cycle_directive, CycleDirective
+from src.runtime.daily_plan import load_daily_plan_state
+from src.runtime.deterministic_planner import DeterministicPlanGenerator
+from src.runtime.news_cooldown import cleanup_expired_news_cooldowns, record_news_cooldown
+from src.runtime.persona_policy import load_persona_policy, apply_coin_bias_overrides
+from src.runtime.plan_auditor import PlanAuditor
+from src.runtime.plan_executor import PlanExecutor
+from src.runtime.plan_io import save_pending_plan, load_plan_for_execution, delete_pending_plan
+from src.runtime.platform_limits import update_limits_from_results
+from src.runtime.post_registry import (
+    get_recent_agent_posts,
+    get_recent_other_agent_posts,
+    record_completed_posts,
+)
+from src.runtime.runtime_settings import load_runtime_settings
+from src.runtime.session_context import SessionContextBuilder, save_session_context
+from src.runtime.session_loop import ContinuousSessionRunner
+from src.operator.strategic_bridge import load_strategic_directive
+from src.runtime.topic_reservation import (
+    cleanup_expired,
+    confirm_reservation,
+    get_active_reservations,
+    release_all_agent_reservations,
+)
+from src.sdk import BinanceSquareSDK
+
+logger = logging.getLogger("bsq.session.run")
 
 
-async def session():
-    from src.sdk import BinanceSquareSDK
-    from src.runtime.agent_config import load_active_agent
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run one Binance Square agent session.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--prepare", action="store_true", help="Collect context and generate plan skeleton (no text).")
+    mode.add_argument("--execute", action="store_true", help="Execute plan with agent-authored text.")
+    mode.add_argument("--continuous", action="store_true", help="Legacy autonomous continuous loop.")
+    mode.add_argument("--post-only", action="store_true", help="Run post-only validation slots.")
+    parser.add_argument("--config", default="config/active_agent.yaml", help="Runtime agent config YAML.")
+    parser.add_argument("--settings", default="config/settings.yaml", help="Runtime settings YAML.")
+    parser.add_argument("--max-cycles", type=int, default=None, help="Optional cycle limit for continuous mode.")
+    parser.add_argument("--stop-file", default=None, help="Optional stop flag path for continuous mode.")
+    parser.add_argument("--post-count", type=int, default=1, help="Number of post-only slots to execute.")
+    parser.add_argument("--post-delay-min", type=int, default=45, help="Minimum delay between post-only slots.")
+    parser.add_argument("--post-delay-max", type=int, default=90, help="Maximum delay between post-only slots.")
+    return parser
 
-    agent = load_active_agent()
-    sdk = BinanceSquareSDK(
+
+def setup_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
+
+
+async def init_runtime_state() -> None:
+    db_path = get_db_path()
+    await init_db(db_path)
+    await init_metrics_tables(db_path)
+
+
+def _load_agent(config_path: str) -> Any:
+    """Load agent config with effective_config and persona policy."""
+    agent = load_active_agent(config_path)
+    agent = agent.effective_config()
+
+    policy_path = Path(f"config/persona_policies/{agent.agent_id}.yaml")
+    if policy_path.exists():
+        policy = load_persona_policy(policy_path)
+        if agent.mode == "individual" and agent.mode_override:
+            ovr = agent.mode_override
+            policy = apply_coin_bias_overrides(
+                policy,
+                preferred=ovr.coin_bias_preferred,
+                exclude_from_posts=ovr.coin_bias_exclude_from_posts,
+            )
+        agent._policy = policy
+    else:
+        agent._policy = None
+
+    return agent
+
+
+def _build_sdk(agent: Any, settings: dict[str, Any]) -> BinanceSquareSDK:
+    return BinanceSquareSDK(
         profile_serial=agent.profile_serial,
         account_id=agent.agent_id,
+        max_session_actions=agent.max_session_actions,
+        session_minimum=agent.session_minimum.as_dict(),
+        profile_username=agent.binance_username or None,
+        adspower_base_url=settings.get("adspower_base_url"),
     )
-    await sdk.connect()
-    logger.info(
-        "Connected to AdsPower profile for %s (serial=%s)",
+
+
+# ---------------------------------------------------------------------------
+# --prepare: collect context, generate plan skeleton, save to file
+# ---------------------------------------------------------------------------
+
+async def run_prepare(args: argparse.Namespace) -> dict[str, Any]:
+    """Collect context, generate plan (no text), save for agent authoring."""
+    load_dotenv()
+    settings = load_runtime_settings(args.settings)
+    agent = _load_agent(args.config)
+    await init_runtime_state()
+    db_path = get_db_path()
+
+    # Cleanup expired coordination locks
+    await cleanup_expired(db_path)
+    await cleanup_expired_comment_locks(db_path)
+    await cleanup_expired_news_cooldowns(db_path)
+
+    sdk = _build_sdk(agent, settings)
+    builder = SessionContextBuilder(agent_dir=agent.agent_dir)
+    generator = DeterministicPlanGenerator(agent=agent, sdk=sdk, db_path=db_path)
+    auditor = PlanAuditor()
+
+    # Load daily plan for directive adjustment
+    daily_targets = agent.session_minimum.as_dict()
+    daily_plan = load_daily_plan_state(
         agent.agent_id,
-        agent.profile_serial,
+        targets=daily_targets,
+        timezone_name=agent.daily_plan_timezone,
     )
 
+    if agent.mode == "test":
+        logger.info("TEST MODE: skipping SDK connect for %s", agent.agent_id)
+    else:
+        await sdk.connect()
+
     try:
-        return await _run_session(sdk, agent.binance_username)
+        context = await builder.build(sdk, agent)
+        context_files = save_session_context(context)
+        directive = build_cycle_directive(agent, context, daily_plan_state=daily_plan)
+        recent_other_posts = get_recent_other_agent_posts(agent.agent_id)
+        recent_self_posts = get_recent_agent_posts(agent.agent_id)
+        active_reservations = await get_active_reservations(db_path, exclude_agent_id=agent.agent_id)
+
+        # Load strategic directive from persona (if available)
+        strategic_directive = load_strategic_directive(agent.agent_id)
+        if strategic_directive:
+            logger.info("Using strategic directive for %s: %s", agent.agent_id, strategic_directive.get("focus_summary", "")[:80])
+
+        # Generate plan (no text — brief_context and target_text only)
+        plan = await _generate_audited_plan(
+            generator=generator,
+            auditor=auditor,
+            agent=agent,
+            context=context,
+            directive=directive,
+            recent_other_posts=recent_other_posts,
+            recent_self_posts=recent_self_posts,
+            active_reservations=active_reservations,
+            db_path=db_path,
+            strategic_directive=strategic_directive,
+        )
+
+        # Save plan for agent to author text
+        plan_path = save_pending_plan(
+            agent_id=agent.agent_id,
+            plan=plan,
+            directive=directive,
+            context_files=context_files,
+        )
+
+        result = {
+            "mode": "prepare",
+            "agent_id": agent.agent_id,
+            "plan_path": plan_path,
+            "context_files": context_files,
+            "action_count": len(plan.actions),
+            "directive_stage": directive.stage,
+        }
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return result
+
     finally:
-        await sdk.disconnect()
-        logger.info("Session complete. Disconnected.")
+        if agent.mode != "test":
+            await sdk.disconnect()
 
 
-async def _run_session(sdk, binance_username: str):
-    # =====================================================
-    # PHASE 1: Gather context — market, news, TA
-    # =====================================================
-    logger.info("=== PHASE 1: Market Context ===")
+async def _generate_audited_plan(
+    *,
+    generator: DeterministicPlanGenerator,
+    auditor: PlanAuditor,
+    agent: Any,
+    context: Any,
+    directive: CycleDirective,
+    recent_other_posts: list[dict[str, Any]],
+    recent_self_posts: list[dict[str, Any]],
+    active_reservations: list[dict[str, str | None]] | None = None,
+    db_path: str | None = None,
+    strategic_directive: dict[str, Any] | None = None,
+) -> Any:
+    """Generate plan with up to 2 audit retries."""
+    audit_feedback: list[str] = []
+    last_error = "plan generation did not run"
 
-    # market = {"BTC": {"price": float, "change_24h": float, "volume": float}, ...}
-    market = await sdk.get_market_data(["BTC", "ETH", "SOL", "BNB", "XRP"])
-    logger.info(f"Market: {json.dumps(market, indent=2, default=str)}")
-
-    news = await sdk.get_crypto_news(limit=5)
-    logger.info(f"News: {json.dumps(news, indent=2, default=str)}")
-
-    # TA returns flat dict: {rsi, macd, support, resistance, trend, ma20, ma50, ma200, ...}
-    try:
-        btc_ta = await sdk.get_ta_summary("BTC", "1D")
-        logger.info(f"BTC TA: {json.dumps(btc_ta, indent=2, default=str)}")
-    except Exception as e:
-        logger.warning(f"BTC TA failed: {e}")
-        btc_ta = {}
-
-    try:
-        eth_ta = await sdk.get_ta_summary("ETH", "4h")
-        logger.info(f"ETH TA: {json.dumps(eth_ta, indent=2, default=str)}")
-    except Exception as e:
-        logger.warning(f"ETH TA failed: {e}")
-        eth_ta = {}
-
-    # =====================================================
-    # PHASE 2: Check replies to my comments (priority #1)
-    # =====================================================
-    logger.info("=== PHASE 2: Check Replies ===")
-
-    replies = await sdk.get_my_comment_replies(username=binance_username)
-    logger.info(f"Comment replies: {json.dumps(replies, indent=2, default=str)}")
-
-    # Reply to people who engaged with my comments
-    if replies and isinstance(replies, list):
-        for r in replies:
-            post_id = r.get("comment_post_id", "")
-            if not post_id:
-                continue
-            for rep in r.get("replies", []):
-                handle = rep.get("author_handle", "")
-                rep_text = rep.get("text", "")
-                if handle == "aisama" or not rep_text.strip():
-                    continue
-                # Build a reply
-                reply = _build_reply(handle, rep_text, r.get("comment_text", ""), btc_ta)
-                if reply:
-                    logger.info(f"Replying to @{handle} on post {post_id}")
-                    result = await sdk.comment_on_post(post_id, reply)
-                    logger.info(f"Reply result: {result}")
-                    await asyncio.sleep(random.uniform(8, 15))
-
-    # =====================================================
-    # PHASE 3: Browse feed, engage with good posts
-    # =====================================================
-    logger.info("=== PHASE 3: Feed Engagement ===")
-
-    posts = await sdk.get_feed_posts(count=25)
-    logger.info(f"Got {len(posts) if posts else 0} feed posts")
-
-    # Filter: skip spam, keep quality
-    good_posts = []
-    if posts:
-        for p in posts:
-            text = p.get("text", "")
-            likes = p.get("like_count", 0)
-            post_id = p.get("post_id", "")
-            author = p.get("author", "")
-
-            if not text or len(text) < 50:
-                continue
-            spam_words = ["gift", "giveaway", "airdrop", "copy trading", "SIGN", "sign token", "free crypto", "claim"]
-            if any(w.lower() in text.lower() for w in spam_words):
-                continue
-
-            good_posts.append({
-                "post_id": post_id,
-                "author": author,
-                "text": text[:300],
-                "likes": likes,
-            })
-
-    good_posts.sort(key=lambda x: x["likes"], reverse=True)
-    logger.info(f"Found {len(good_posts)} quality posts")
-    for i, p in enumerate(good_posts[:10]):
-        logger.info(f"  [{i}] @{p['author']} ({p['likes']} likes): {p['text'][:100]}")
-
-    # Engage: 3 comments on 80+ like posts, 2-3 extra likes
-    engaged = []
-    comments_made = 0
-    likes_done = 0
-    authors_engaged = set()
-
-    for post in good_posts:
-        if comments_made >= 3 and likes_done >= 4:
-            break
-
-        pid = post["post_id"]
-        author = post["author"]
-        text = post["text"]
-        likes = post["likes"]
-
-        if author in authors_engaged:
+    for attempt_index in range(2):
+        try:
+            plan = await generator.generate_plan(
+                context=context,
+                directive=directive,
+                recent_other_posts=recent_other_posts,
+                recent_self_posts=recent_self_posts,
+                audit_feedback=audit_feedback,
+                attempt_index=attempt_index,
+                strategic_directive=strategic_directive,
+            )
+        except Exception as exc:
+            last_error = str(exc)
+            audit_feedback = [last_error]
+            logger.warning("plan generation failed for %s: %s", agent.agent_id, exc)
             continue
 
-        # Comment + like on popular posts
-        if likes >= 80 and comments_made < 3:
-            comment = _build_comment(text, market, btc_ta, eth_ta)
-            if comment:
-                logger.info(f"Engaging {pid} by @{author} ({likes} likes) — like+comment")
-                result = await sdk.engage_post(pid, like=True, comment=comment)
-                logger.info(f"Result: {result}")
-                engaged.append({"post_id": pid, "author": author, "action": "like+comment"})
-                comments_made += 1
-                likes_done += 1
-                authors_engaged.add(author)
-                await asyncio.sleep(random.uniform(15, 30))
-                continue
+        audit = auditor.audit(
+            plan,
+            agent=agent,
+            context=context,
+            directive=directive,
+            recent_other_posts=recent_other_posts,
+            recent_self_posts=recent_self_posts,
+            active_reservations=active_reservations or [],
+        )
+        if audit.valid:
+            return plan
 
-        # Just like for medium posts
-        if likes >= 20 and likes_done < 5:
-            logger.info(f"Liking {pid} by @{author} ({likes} likes)")
-            result = await sdk.like_post(pid)
-            logger.info(f"Like: {result}")
-            engaged.append({"post_id": pid, "author": author, "action": "like"})
-            likes_done += 1
-            authors_engaged.add(author)
-            await asyncio.sleep(random.uniform(5, 12))
+        audit_feedback = audit.messages()
+        last_error = "; ".join(audit_feedback)
+        logger.warning("plan audit rejected draft for %s: %s", agent.agent_id, last_error)
+        if db_path:
+            await release_all_agent_reservations(db_path, agent_id=agent.agent_id)
 
-    # =====================================================
-    # PHASE 4: Create own post with chart
-    # =====================================================
-    logger.info("=== PHASE 4: Create Post ===")
+    raise RuntimeError(f"unable to produce a valid plan for {agent.agent_id}: {last_error}")
 
-    # Screenshot BTC chart
-    chart_path = None
+
+# ---------------------------------------------------------------------------
+# --execute: load authored plan, re-audit with text, execute, commit
+# ---------------------------------------------------------------------------
+
+async def run_execute(args: argparse.Namespace) -> dict[str, Any]:
+    """Load plan with agent-authored text, re-audit, execute, commit."""
+    load_dotenv()
+    settings = load_runtime_settings(args.settings)
+    agent = _load_agent(args.config)
+    await init_runtime_state()
+    db_path = get_db_path()
+
+    # Load plan and validate text is present
+    plan = load_plan_for_execution(agent.agent_id)
+
+    # Re-audit with text (now checks length, paragraphs, similarity, trailing period)
+    auditor = PlanAuditor()
+    recent_other_posts = get_recent_other_agent_posts(agent.agent_id)
+    recent_self_posts = get_recent_agent_posts(agent.agent_id)
+
+    # Build minimal context for audit (directive from plan file)
+    from src.runtime.plan_io import load_pending_plan
+    plan_data = load_pending_plan(agent.agent_id)
+    directive_data = plan_data.get("directive", {})
+    directive = CycleDirective(
+        stage=directive_data.get("stage", "default"),
+        target_comments=directive_data.get("target_comments", 0),
+        target_likes=directive_data.get("target_likes", 0),
+        target_posts=directive_data.get("target_posts", 0),
+        target_follows=directive_data.get("target_follows", 0),
+        interval_minutes=(20, 35),
+    )
+
+    audit = auditor.audit(
+        plan,
+        agent=agent,
+        context=None,
+        directive=directive,
+        recent_other_posts=recent_other_posts,
+        recent_self_posts=recent_self_posts,
+    )
+    if not audit.valid:
+        error_msg = "; ".join(audit.messages())
+        logger.error("Plan re-audit failed for %s: %s", agent.agent_id, error_msg)
+        result = {
+            "mode": "execute",
+            "agent_id": agent.agent_id,
+            "success": False,
+            "error": f"re-audit failed: {error_msg}",
+            "audit_issues": audit.messages(),
+        }
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return result
+
+    sdk = _build_sdk(agent, settings)
+    executor = PlanExecutor(sdk, config_path=args.config, guard=getattr(sdk, '_guard', None))
+    if hasattr(agent, '_policy') and agent._policy:
+        executor._delay_config = agent._policy.runtime_tuning.delays
+
+    if agent.mode == "test":
+        logger.info("TEST MODE: skipping SDK connect for %s", agent.agent_id)
+    else:
+        await sdk.connect()
+
     try:
-        chart_path = await sdk.screenshot_chart("BTC_USDT", "4H")
-        logger.info(f"Chart: {chart_path}")
-    except Exception as e:
-        logger.warning(f"Chart failed: {e}")
-        try:
-            chart_path = await sdk.take_screenshot(
-                "https://www.binance.com/en/trade/BTC_USDT?type=spot", wait=8
+        results = await executor.execute(
+            plan,
+            dry_run=(agent.mode == "test"),
+        )
+
+        # Commit results
+        update_limits_from_results(agent.agent_id, results)
+        record_completed_posts(agent.agent_id, plan, results)
+
+        # Confirm reservations
+        reservation_keys = [a.reservation_key for a in plan.sorted_actions() if a.reservation_key]
+        for key in reservation_keys:
+            await confirm_reservation(db_path, agent_id=agent.agent_id, reservation_key=key)
+
+        # Record news cooldowns for successful news_reaction posts
+        actions = plan.sorted_actions()
+        for action, action_result in zip(actions, results):
+            if action.action == "post" and action.post_family == "news_reaction" and action_result.get("success"):
+                await record_news_cooldown(
+                    db_path,
+                    agent_id=agent.agent_id,
+                    source_url=action.source_url or None,
+                    headline=action.visual_title or None,
+                )
+
+        # Update daily plan
+        from src.runtime.daily_plan import update_daily_plan_state
+        update_daily_plan_state(
+            agent.agent_id,
+            results=results,
+            targets=agent.session_minimum.as_dict(),
+            timezone_name=agent.daily_plan_timezone,
+        )
+
+        # Clean up pending plan
+        delete_pending_plan(agent.agent_id)
+
+        # Compute actual success based on mandatory action results
+        mandatory_types = {"post", "comment", "quote_repost"}
+        mandatory_results = [r for r in results if r.get("action") in mandatory_types]
+        mandatory_successes = [r for r in mandatory_results if r.get("success")]
+        all_mandatory_failed = bool(mandatory_results) and len(mandatory_successes) == 0
+
+        result = {
+            "mode": "execute",
+            "agent_id": agent.agent_id,
+            "success": not all_mandatory_failed,
+            "all_mandatory_failed": all_mandatory_failed,
+            "mandatory_attempted": len(mandatory_results),
+            "mandatory_succeeded": len(mandatory_successes),
+            "results": results,
+        }
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return result
+
+    finally:
+        if agent.mode != "test":
+            await sdk.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# --continuous (legacy) and --post-only
+# ---------------------------------------------------------------------------
+
+async def run_continuous(args: argparse.Namespace) -> dict[str, Any]:
+    runner = ContinuousSessionRunner(
+        config_path=args.config,
+        settings_path=args.settings,
+        max_cycles=args.max_cycles,
+        stop_file=args.stop_file,
+    )
+    return await runner.run()
+
+
+async def run_post_only(args: argparse.Namespace) -> dict[str, Any]:
+    """Legacy post-only mode — uses prepare+execute internally."""
+    load_dotenv()
+    settings = load_runtime_settings(args.settings)
+    agent = _load_agent(args.config)
+    await init_runtime_state()
+
+    sdk = _build_sdk(agent, settings)
+    executor = PlanExecutor(sdk, config_path=args.config, guard=getattr(sdk, '_guard', None))
+    await sdk.connect()
+
+    try:
+        # Post-only still uses the old flow since it's legacy
+        from src.runtime.deterministic_planner import DeterministicPlanGenerator
+        db_path = get_db_path()
+        builder = SessionContextBuilder(agent_dir=agent.agent_dir)
+        generator = DeterministicPlanGenerator(agent=agent, sdk=sdk, db_path=db_path)
+        auditor = PlanAuditor()
+
+        directive = CycleDirective(
+            stage="post_only_validation",
+            target_comments=0, target_likes=0, target_posts=1, target_follows=0,
+            interval_minutes=(1, 2),
+            preferred_symbols=list(getattr(agent, "market_symbols", [])),
+        )
+
+        slots = []
+        for slot_index in range(args.post_count):
+            context = await builder.build(sdk, agent)
+            context_files = save_session_context(context)
+            recent_other = get_recent_other_agent_posts(agent.agent_id)
+            recent_self = get_recent_agent_posts(agent.agent_id)
+            reservations = await get_active_reservations(db_path, exclude_agent_id=agent.agent_id)
+            plan = await _generate_audited_plan(
+                generator=generator, auditor=auditor, agent=agent,
+                context=context, directive=directive,
+                recent_other_posts=recent_other, recent_self_posts=recent_self,
+                active_reservations=reservations, db_path=db_path,
             )
-            logger.info(f"Fallback chart: {chart_path}")
-        except Exception as e2:
-            logger.warning(f"Fallback also failed: {e2}")
-
-    post_text, coin, sentiment = _build_post(market, btc_ta, eth_ta, news)
-    logger.info(f"Post:\n{post_text}")
-
-    result = await sdk.create_post(text=post_text, coin=coin, sentiment=sentiment, image_path=chart_path)
-    logger.info(f"Post result: {result}")
-
-    # =====================================================
-    # PHASE 5: Check minimum and wrap up
-    # =====================================================
-    logger.info("=== PHASE 5: Session Check ===")
-
-    status = sdk.get_minimum_status()
-    can_stop, reason = sdk.can_finish()
-    logger.info(f"Status: {status} | Can finish: {can_stop} ({reason})")
-
-    if not can_stop:
-        logger.info("Minimum not met, doing extra work...")
-        remaining = [p for p in good_posts if p["author"] not in authors_engaged]
-        for post in remaining[:4]:
-            await sdk.like_post(post["post_id"])
-            likes_done += 1
-            await asyncio.sleep(random.uniform(4, 8))
-        if comments_made < 1 and remaining:
-            c = _build_comment(remaining[0]["text"], market, btc_ta, eth_ta)
-            if c:
-                await sdk.comment_on_post(remaining[0]["post_id"], c)
-                comments_made += 1
-
-        can_stop, reason = sdk.can_finish()
-        logger.info(f"After extra: {can_stop} ({reason})")
-
-    return {
-        "market": market,
-        "replies": replies,
-        "engaged": engaged,
-        "comments_made": comments_made,
-        "likes_done": likes_done,
-        "post_text": post_text,
-    }
+            results = await executor.execute(plan)
+            update_limits_from_results(agent.agent_id, results)
+            record_completed_posts(agent.agent_id, plan, results)
+            slots.append({"slot": slot_index + 1, "results": results})
+            if slot_index + 1 < args.post_count:
+                await asyncio.sleep(random.randint(args.post_delay_min, args.post_delay_max))
+        return {"mode": "post_only", "slots": slots}
+    finally:
+        await sdk.disconnect()
 
 
-# =====================================================
-# Content builders — I write these myself
-# =====================================================
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
-def _build_comment(post_text: str, market: dict, btc_ta: dict, eth_ta: dict) -> str:
-    """Topic-matched comment. Market is {"BTC": {"price", "change_24h"}, ...}.
-    TA is flat: {"rsi", "macd", "support", "resistance", "trend", ...}."""
-    text_lower = post_text.lower()
+async def main_async() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    setup_logging()
 
-    btc_price = market.get("BTC", {}).get("price", "?")
-    btc_rsi = btc_ta.get("rsi", "?")
-    btc_support = btc_ta.get("support", "?")
-    btc_resistance = btc_ta.get("resistance", "?")
-    btc_macd = btc_ta.get("macd", "?")
-    eth_rsi = eth_ta.get("rsi", "?")
-    eth_support = eth_ta.get("support", "?")
-
-    # Format support/resistance as dollar amounts
-    def fmt(v):
-        try:
-            return f"${float(v):,.0f}"
-        except (ValueError, TypeError):
-            return str(v)
-
-    sup = fmt(btc_support)
-    res = fmt(btc_resistance)
-    eth_sup = fmt(eth_support)
-
-    # ETH post
-    if any(w in text_lower for w in ["eth", "ethereum", "$eth"]):
-        return f"ETH 4H RSI at {eth_rsi} — been grinding near {eth_sup} support. need a clean reclaim of the 200 MA before getting excited. patience > fomo rn"
-
-    # SOL post
-    if any(w in text_lower for w in ["sol", "solana", "$sol"]):
-        sol_price = market.get("SOL", {}).get("price", "?")
-        sol_change = market.get("SOL", {}).get("change_24h", "?")
-        return f"SOL at ${sol_price} ({sol_change}% today) still deep below every major MA. ecosystem is building but price doesn't care yet. waiting for BTC to find a bottom first"
-
-    # Meme coins
-    if any(w in text_lower for w in ["shib", "doge", "pepe", "meme", "floki", "bonk"]):
-        return "meme coins = pure sentiment play. when BTC is shaky they bleed faster than anything. but when the reversal hits they also 2-3x before alts move. timing is everything"
-
-    # Liquidation / bearish
-    if any(w in text_lower for w in ["liquidat", "crash", "dump", "bearish", "blood", "capitulat"]):
-        return f"liquidations separate corrections from capitulation. BTC RSI {btc_rsi} with MACD {btc_macd} — deep in the pain zone. {sup} held multiple tests though, that breaks = new lows"
-
-    # Bullish / recovery
-    if any(w in text_lower for w in ["bullish", "pump", "rally", "recovery", "bounce", "reversal"]):
-        return f"want to be bullish but data says not yet — BTC below all major MAs, RSI {btc_rsi}, MACD {btc_macd}. need {res} reclaimed before calling reversal. dead cat bounce risk is real"
-
-    # Institutional / ETF
-    if any(w in text_lower for w in ["institution", "etf", "morgan", "blackrock", "adoption", "bnp"]):
-        return f"institutions buying while retail panics — same pattern every cycle. they position during fear, not euphoria. BTC RSI {btc_rsi} is exactly the zone smart money accumulates"
-
-    # Trading / analysis / TA
-    if any(w in text_lower for w in ["support", "resistance", "chart", "technical", "analysis"]):
-        return f"key levels: {sup} support, {res} resistance. RSI {btc_rsi} leaves room either way. watching MACD at {btc_macd} for crossover signal — still negative but trend improving"
-
-    # BTC / market generic
-    if any(w in text_lower for w in ["btc", "bitcoin", "$btc", "market"]):
-        return f"BTC at ${btc_price} with RSI {btc_rsi} — daily chart looks heavy but {sup} keeps holding. three tests without breaking is actually constructive. MACD crossover would confirm the bounce"
-
-    # XRP
-    if any(w in text_lower for w in ["xrp", "ripple", "$xrp"]):
-        xrp_price = market.get("XRP", {}).get("price", "?")
-        return f"XRP at ${xrp_price} — regulatory clarity was supposed to be the catalyst but price still tracking BTC. until macro shifts and BTC breaks {res}, alts stay rangebound"
-
-    # BNB
-    if any(w in text_lower for w in ["bnb", "$bnb"]):
-        bnb_price = market.get("BNB", {}).get("price", "?")
-        return f"BNB at ${bnb_price} holding relatively well. exchange tokens usually last to dump hard. still, not adding until BTC RSI recovers from {btc_rsi}"
-
-    # Fallback
-    return f"solid take. BTC RSI {btc_rsi} at {sup} support — inflection point. next few days should reveal if this is accumulation or distribution"
-
-
-def _build_reply(handle: str, their_text: str, my_comment: str, btc_ta: dict) -> str:
-    """Reply to someone who responded to my comment."""
-    text_lower = their_text.lower()
-    btc_support = btc_ta.get("support", "65500")
-
-    try:
-        sup = f"${float(btc_support):,.0f}"
-    except (ValueError, TypeError):
-        sup = str(btc_support)
-
-    if any(w in text_lower for w in ["thank", "agree", "right", "exactly", "good point", "true", "nice"]):
-        return f"appreciate it. watching {sup} closely — if it holds through the weekend might see a relief bounce early next week"
-
-    if any(w in text_lower for w in ["disagree", "wrong", "no way", "but", "however", "actually"]):
-        return "fair point — could go either way. that's what makes this range interesting. watching how the weekly candle closes"
-
-    if "?" in their_text:
-        btc_rsi = btc_ta.get("rsi", "?")
-        return f"good question — watching RSI ({btc_rsi} rn) and daily MACD for direction. when those align with a support bounce, that's my signal"
-
-    return "yeah for sure — tricky market. data helps cut through the noise though"
-
-
-def _build_post(market: dict, btc_ta: dict, eth_ta: dict, news: list) -> tuple[str, str, str]:
-    """Build a post. Returns (text, coin, sentiment).
-    market = {"BTC": {"price", "change_24h"}, ...}
-    btc_ta = {"rsi", "macd", "support", "resistance", "trend", "ma20", ...}
-    """
-    btc = market.get("BTC", {})
-    eth = market.get("ETH", {})
-    sol = market.get("SOL", {})
-
-    btc_price = btc.get("price", 0)
-    btc_change = btc.get("change_24h", 0)
-    eth_price = eth.get("price", 0)
-    eth_change = eth.get("change_24h", 0)
-    sol_price = sol.get("price", 0)
-
-    # Format prices
-    def fmtp(v):
-        try:
-            return f"${float(v):,.0f}"
-        except (ValueError, TypeError):
-            return str(v)
-
-    def fmtl(v):
-        """Format level (support/resistance) nicely."""
-        try:
-            val = float(v)
-            if val > 1000:
-                return f"${val:,.0f}"
-            return f"${val:,.2f}"
-        except (ValueError, TypeError):
-            return str(v)
-
-    btc_p = fmtp(btc_price)
-    eth_p = fmtp(eth_price)
-
-    # TA — flat dict keys
-    btc_rsi = btc_ta.get("rsi", "?")
-    btc_macd = btc_ta.get("macd", "?")
-    btc_support = fmtl(btc_ta.get("support", "?"))
-    btc_resistance = fmtl(btc_ta.get("resistance", "?"))
-    btc_ma20 = fmtl(btc_ta.get("ma20", "?"))
-    btc_ma50 = fmtl(btc_ta.get("ma50", "?"))
-    eth_rsi = eth_ta.get("rsi", "?")
-    eth_support = fmtl(eth_ta.get("support", "?"))
-
-    # Round RSI/MACD for readability
-    try:
-        btc_rsi_r = round(float(btc_rsi), 1)
-    except (ValueError, TypeError):
-        btc_rsi_r = btc_rsi
-    try:
-        btc_macd_r = round(float(btc_macd), 0)
-    except (ValueError, TypeError):
-        btc_macd_r = btc_macd
-    try:
-        eth_rsi_r = round(float(eth_rsi), 1)
-    except (ValueError, TypeError):
-        eth_rsi_r = eth_rsi
-    try:
-        btc_change_f = float(btc_change)
-    except (ValueError, TypeError):
-        btc_change_f = 0
-
-    # Check for institutional news angle
-    inst_headline = None
-    for n in (news or []):
-        title = n.get("title", "").lower() if isinstance(n, dict) else ""
-        if any(w in title for w in ["etf", "morgan", "blackrock", "institution", "bnp", "bank", "sec"]):
-            inst_headline = n.get("title", "")
-            break
-
-    # Mood
-    if btc_change_f < -2:
-        mood = "bleeding"
-    elif btc_change_f < -0.5:
-        mood = "drifting"
-    elif btc_change_f > 2:
-        mood = "pumping"
-    elif btc_change_f > 0.5:
-        mood = "recovering"
+    if args.prepare:
+        await run_prepare(args)
+    elif args.execute:
+        await run_execute(args)
+        # Always return 0 — operator reads JSON stdout for actual success
+    elif args.post_only:
+        await run_post_only(args)
     else:
-        mood = "flat"
-
-    # Sentiment
-    sentiment = "bearish" if btc_change_f < -1 else ("bullish" if btc_change_f > 1 else "neutral")
-
-    if mood == "flat":
-        text = (
-            f"$BTC at {btc_p} — barely moving after days of red. the calm before the storm?\n\n"
-            f"daily RSI {btc_rsi_r}, MACD {btc_macd_r}. still below 20 MA ({btc_ma20}) and 50 MA ({btc_ma50}). "
-            f"sellers running out of ammo or just taking a breath?\n\n"
-            f"{btc_support} support held 4+ tests now — either it becomes the floor or it breaks hard. "
-            f"{btc_resistance} is the first real resistance. compressed ranges resolve violently.\n\n"
-            f"$ETH at {eth_p} with 4H RSI {eth_rsi_r} — tracking BTC, underperforming. "
-            f"need to reclaim {eth_support} as support before considering any longs.\n\n"
-            f"have your alerts set, don't stare at charts all day. levels are clear.\n\n"
-            f"#BTC #Bitcoin #CryptoAnalysis #TechnicalAnalysis"
-        )
-    elif mood in ("bleeding", "drifting"):
-        text = (
-            f"$BTC bleeding to {btc_p} ({btc_change}% 24h) — red days keep stacking.\n\n"
-            f"RSI {btc_rsi_r} on daily, MACD {btc_macd_r}. every MA overhead = resistance. "
-            f"the only backstop is {btc_support} support. it held so far but each test weakens it.\n\n"
-            f"$ETH at {eth_p} ({eth_change}%), 4H RSI {eth_rsi_r}. $SOL at ${sol_price}.\n\n"
-            f"not the time to catch knives. cash is a position. "
-            f"if {btc_support} cracks, next support is way below.\n\n"
-            f"#BTC #Bitcoin #CryptoMarket #BearMarket"
-        )
-    elif mood in ("pumping", "recovering"):
-        text = (
-            f"$BTC pushing to {btc_p} (+{btc_change}%) — first real green in a while.\n\n"
-            f"RSI recovering to {btc_rsi_r} but MACD still {btc_macd_r}. one green day is not a reversal. "
-            f"need {btc_resistance} broken and held to flip structure.\n\n"
-            f"$ETH at {eth_p} — if BTC holds, ETH usually follows. watching {eth_support} as new floor.\n\n"
-            f"cautiously optimistic but stops are tight. relief ≠ reversal.\n\n"
-            f"#BTC #Bitcoin #CryptoRecovery #TechnicalAnalysis"
-        )
-    else:
-        text = (
-            f"$BTC at {btc_p} ({btc_change}%) — RSI {btc_rsi_r}, MACD {btc_macd_r}.\n\n"
-            f"support {btc_support}, resistance {btc_resistance}. "
-            f"range-bound until one breaks.\n\n"
-            f"#BTC #Bitcoin #Crypto"
-        )
-
-    return text, "BTC", sentiment
+        await run_continuous(args)
+    return 0
 
 
 if __name__ == "__main__":
-    result = asyncio.run(session())
-    print("\n=== SESSION SUMMARY ===")
-    print(f"Comments: {result.get('comments_made')}")
-    print(f"Likes: {result.get('likes_done')}")
-    print(f"Engaged: {len(result.get('engaged', []))}")
-    print(f"Replies found: {len(result.get('replies', []))}")
+    raise SystemExit(asyncio.run(main_async()))
