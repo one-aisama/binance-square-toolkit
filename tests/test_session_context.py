@@ -7,8 +7,8 @@ from src.runtime.session_context import SessionContextBuilder
 from tests.helpers import make_agent
 
 
-def test_sweetdi_feed_prioritization_prefers_altcoin_threads():
-    builder = SessionContextBuilder("agents/sweetdi")
+def test_example_altcoin_feed_prioritization_prefers_altcoin_threads():
+    builder = SessionContextBuilder("agents/example_altcoin")
     prepared = builder._prepare_posts(
         [
             {
@@ -27,7 +27,7 @@ def test_sweetdi_feed_prioritization_prefers_altcoin_threads():
         "recommended",
     )
     agent = make_agent(
-        "sweetdi",
+        "example_altcoin",
         market_symbols=["SOL", "LINK", "AVAX"],
         primary_feed_tab="recommended",
     )
@@ -38,8 +38,8 @@ def test_sweetdi_feed_prioritization_prefers_altcoin_threads():
     assert "preferred_alt:SOL" in prioritized[0].selection_reason
 
 
-def test_aisama_feed_prioritization_prefers_btc_macro_threads():
-    builder = SessionContextBuilder("agents/aisama")
+def test_example_macro_feed_prioritization_prefers_btc_macro_threads():
+    builder = SessionContextBuilder("agents/example_macro")
     prepared = builder._prepare_posts(
         [
             {
@@ -58,7 +58,7 @@ def test_aisama_feed_prioritization_prefers_btc_macro_threads():
         "recommended",
     )
     agent = make_agent(
-        "aisama",
+        "example_macro",
         market_symbols=["BTC", "ETH", "SOL"],
         primary_feed_tab="recommended",
     )

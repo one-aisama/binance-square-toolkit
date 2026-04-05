@@ -38,7 +38,7 @@ async def run_pipeline(
 
     Args:
         agent_id: Agent identifier.
-        agent_dir: Path to agent's directory (e.g., "agents/aisama").
+        agent_dir: Path to agent's directory (e.g., "agents/example_macro").
         db_path: Path to SQLite database.
         sdk: Optional BinanceSquareSDK instance (needed for collector).
 

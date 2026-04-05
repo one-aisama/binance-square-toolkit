@@ -354,7 +354,7 @@ async def test_record_guard_noop_without_guard(sdk):
 
 async def test_create_post_merges_live_recent_posts_with_runtime_history(sdk):
     sdk._ws_endpoint = "ws://127.0.0.1:9222/devtools/browser/abc"
-    sdk._profile_username = "aisama"
+    sdk._profile_username = "example_macro"
     validation = MagicMock(valid=False, errors=["duplicate"], warnings=[])
 
     with patch.object(sdk, "_load_live_recent_posts", new_callable=AsyncMock, return_value=["live recent post"]), \

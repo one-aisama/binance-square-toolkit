@@ -31,9 +31,9 @@ class TestSlotManagement:
     def test_available_slots(self):
         scheduler = OperatorScheduler(max_slots=4)
         assert scheduler.available_slots == 4
-        scheduler.register_active("aisama")
+        scheduler.register_active("example_macro")
         assert scheduler.available_slots == 3
-        scheduler.release_slot("aisama")
+        scheduler.release_slot("example_macro")
         assert scheduler.available_slots == 4
 
     def test_no_slots_available(self):
@@ -47,8 +47,8 @@ class TestPickNextAgents:
     @pytest.mark.asyncio
     async def test_picks_due_agents(self, db_path):
         past = datetime.now(timezone.utc) - timedelta(minutes=5)
-        await upsert_agent(db_path, _slot("aisama", next_run_at=past))
-        await upsert_agent(db_path, _slot("sweetdi", next_run_at=past))
+        await upsert_agent(db_path, _slot("example_macro", next_run_at=past))
+        await upsert_agent(db_path, _slot("example_altcoin", next_run_at=past))
 
         scheduler = OperatorScheduler(max_slots=4)
         picked = await scheduler.pick_next_agents(db_path)
@@ -57,7 +57,7 @@ class TestPickNextAgents:
     @pytest.mark.asyncio
     async def test_skips_future_agents(self, db_path):
         future = datetime.now(timezone.utc) + timedelta(minutes=30)
-        await upsert_agent(db_path, _slot("aisama", next_run_at=future))
+        await upsert_agent(db_path, _slot("example_macro", next_run_at=future))
 
         scheduler = OperatorScheduler(max_slots=4)
         picked = await scheduler.pick_next_agents(db_path)
@@ -76,14 +76,14 @@ class TestPickNextAgents:
     @pytest.mark.asyncio
     async def test_skips_active_agents(self, db_path):
         past = datetime.now(timezone.utc) - timedelta(minutes=5)
-        await upsert_agent(db_path, _slot("aisama", next_run_at=past))
-        await upsert_agent(db_path, _slot("sweetdi", next_run_at=past))
+        await upsert_agent(db_path, _slot("example_macro", next_run_at=past))
+        await upsert_agent(db_path, _slot("example_altcoin", next_run_at=past))
 
         scheduler = OperatorScheduler(max_slots=4)
-        scheduler.register_active("aisama")
+        scheduler.register_active("example_macro")
         picked = await scheduler.pick_next_agents(db_path)
         assert len(picked) == 1
-        assert picked[0]["agent_id"] == "sweetdi"
+        assert picked[0]["agent_id"] == "example_altcoin"
 
     @pytest.mark.asyncio
     async def test_priority_ordering(self, db_path):
@@ -98,8 +98,8 @@ class TestPickNextAgents:
     @pytest.mark.asyncio
     async def test_skips_non_idle_agents(self, db_path):
         past = datetime.now(timezone.utc) - timedelta(minutes=5)
-        await upsert_agent(db_path, _slot("aisama", next_run_at=past))
-        await update_agent_state(db_path, "aisama", AgentState.WORKING)
+        await upsert_agent(db_path, _slot("example_macro", next_run_at=past))
+        await update_agent_state(db_path, "example_macro", AgentState.WORKING)
 
         scheduler = OperatorScheduler(max_slots=4)
         picked = await scheduler.pick_next_agents(db_path)
@@ -108,10 +108,10 @@ class TestPickNextAgents:
 
 class TestStagger:
     def test_deterministic(self):
-        assert _agent_stagger_offset("aisama") == _agent_stagger_offset("aisama")
+        assert _agent_stagger_offset("example_macro") == _agent_stagger_offset("example_macro")
 
     def test_different_agents(self):
-        assert _agent_stagger_offset("aisama") != _agent_stagger_offset("sweetdi")
+        assert _agent_stagger_offset("example_macro") != _agent_stagger_offset("example_altcoin")
 
     def test_range(self):
         offset = _agent_stagger_offset("test")

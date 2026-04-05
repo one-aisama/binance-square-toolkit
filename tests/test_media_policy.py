@@ -8,8 +8,8 @@ def test_media_policy_always_requires_image_for_posts():
         {"visual_type": "text"},
     ]
 
-    assert should_attach_image("sweetdi", recent_posts=recent_posts) is True
-    assert should_attach_image("aisama", recent_posts=recent_posts) is True
+    assert should_attach_image("example_altcoin", recent_posts=recent_posts) is True
+    assert should_attach_image("example_macro", recent_posts=recent_posts) is True
 
 
 def test_comments_do_not_require_image():

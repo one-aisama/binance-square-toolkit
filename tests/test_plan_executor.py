@@ -184,9 +184,9 @@ async def test_execute_can_resume_from_saved_action_index():
 def test_executor_uses_agent_specific_config_path_for_visuals():
     sdk = MagicMock()
     with patch("src.runtime.plan_executor.VisualPipeline") as visual_cls:
-        PlanExecutor(sdk, config_path="config/active_agent.sweetdi.yaml")
+        PlanExecutor(sdk, config_path="config/active_agent.example_altcoin.yaml")
 
-    visual_cls.assert_called_once_with(sdk, config_path="config/active_agent.sweetdi.yaml")
+    visual_cls.assert_called_once_with(sdk, config_path="config/active_agent.example_altcoin.yaml")
 
 
 def _make_sdk_and_guard(verdict: Verdict, **kwargs):

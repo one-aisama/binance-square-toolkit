@@ -45,7 +45,7 @@ async def test_commit_cycle_results_skips_already_applied_side_effects(tmp_path,
          patch.object(session_loop, "update_daily_plan_state") as mock_daily, \
          patch.object(session_loop, "save_execution_checkpoint") as mock_save:
         daily_plan, review_path = await runner._commit_cycle_results(
-            agent_id="aisama",
+            agent_id="example_macro",
             checkpoint_payload=checkpoint_payload,
             plan=plan,
             execution_results=[{"action": "post", "success": True, "response": {"success": True}}],

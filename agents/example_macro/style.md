@@ -1,4 +1,4 @@
-# Style Card: aisama
+# Style Card: example_macro
 
 ## Core shape
 - Slightly longer than the other agents

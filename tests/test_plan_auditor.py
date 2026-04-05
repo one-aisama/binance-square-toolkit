@@ -10,7 +10,7 @@ class DummyContext:
         self.my_stats = my_stats
 
 
-def test_auditor_requires_follow_for_sweetdi_bootstrap(monkeypatch):
+def test_auditor_requires_follow_for_example_altcoin_bootstrap(monkeypatch):
     monkeypatch.setattr("src.runtime.plan_auditor.should_attach_image", lambda agent_id: False)
 
     auditor = PlanAuditor()
@@ -53,7 +53,7 @@ def test_auditor_requires_follow_for_sweetdi_bootstrap(monkeypatch):
             },
         ]
     )
-    agent = make_agent("sweetdi")
+    agent = make_agent("example_altcoin")
     directive = SimpleNamespace(stage="bootstrap_graph", target_posts=1)
     context = DummyContext({"followers": 0, "following": 0})
 
@@ -87,7 +87,7 @@ def test_auditor_blocks_trailing_periods(monkeypatch):
             }
         ]
     )
-    agent = make_agent("aisama")
+    agent = make_agent("example_macro")
     directive = SimpleNamespace(stage="analytical_builder", target_posts=1)
     context = DummyContext({"followers": 10, "following": 5})
 
@@ -118,7 +118,7 @@ def test_auditor_requires_image_when_media_policy_demands_it(monkeypatch):
             }
         ]
     )
-    agent = make_agent("aisama")
+    agent = make_agent("example_macro")
     directive = SimpleNamespace(stage="analytical_builder", target_posts=1)
     context = DummyContext({"followers": 10, "following": 5})
 
@@ -154,7 +154,7 @@ def test_auditor_blocks_self_repeat_by_family_and_coin(monkeypatch):
             }
         ]
     )
-    agent = make_agent("aisama")
+    agent = make_agent("example_macro")
     directive = SimpleNamespace(stage="analytical_builder", target_posts=1)
     context = DummyContext({"followers": 10, "following": 5})
     recent_self_posts = [
@@ -206,7 +206,7 @@ def test_auditor_blocks_social_actions_in_post_only_mode(monkeypatch):
             },
         ]
     )
-    agent = make_agent("aisama")
+    agent = make_agent("example_macro")
     directive = SimpleNamespace(stage="post_only_validation", target_posts=1)
     context = DummyContext({"followers": 10, "following": 5})
 
@@ -222,7 +222,7 @@ def test_auditor_blocks_social_actions_in_post_only_mode(monkeypatch):
     assert result.valid is False
     assert any("Post-only validation" in message for message in result.messages())
 
-def test_auditor_allows_sweetdi_reply_limited_plan_with_follow_only(monkeypatch):
+def test_auditor_allows_example_altcoin_reply_limited_plan_with_follow_only(monkeypatch):
     monkeypatch.setattr("src.runtime.plan_auditor.should_attach_image", lambda agent_id: False)
 
     auditor = PlanAuditor()
@@ -246,7 +246,7 @@ def test_auditor_allows_sweetdi_reply_limited_plan_with_follow_only(monkeypatch)
             },
         ]
     )
-    agent = make_agent("sweetdi")
+    agent = make_agent("example_altcoin")
     directive = SimpleNamespace(stage="reply_limited_growth", target_posts=1)
     context = DummyContext({"followers": 1, "following": 6})
 
@@ -282,12 +282,12 @@ def test_auditor_blocks_reusing_same_news_source_from_other_agent(monkeypatch):
             }
         ]
     )
-    agent = make_agent("aisama")
+    agent = make_agent("example_macro")
     directive = SimpleNamespace(stage="post_only_validation", target_posts=1)
     context = DummyContext({"followers": 10, "following": 5})
     recent_other_posts = [
         {
-            "agent_id": "sweetdi",
+            "agent_id": "example_altcoin",
             "source_url": "https://example.com/same-headline",
             "post_family": "news_reaction",
             "visual_type": "news_card",

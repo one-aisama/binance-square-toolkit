@@ -9,11 +9,11 @@ class DummyContext:
         self.my_stats = my_stats
 
 
-def test_build_cycle_directive_for_sweetdi_bootstrap(monkeypatch):
+def test_build_cycle_directive_for_example_altcoin_bootstrap(monkeypatch):
     monkeypatch.setattr("src.runtime.cycle_policy.is_reply_limited", lambda agent_id: False)
 
     agent = make_agent(
-        'sweetdi',
+        'example_altcoin',
         market_symbols=['SOL', 'LINK', 'AVAX', 'BTC'],
         cycle_interval_minutes=[15, 28],
     )
@@ -31,7 +31,7 @@ def test_build_cycle_directive_shrinks_to_daily_remaining(monkeypatch):
     monkeypatch.setattr("src.runtime.cycle_policy.is_reply_limited", lambda agent_id: False)
 
     agent = make_agent(
-        'aisama',
+        'example_macro',
         market_symbols=['BTC', 'ETH', 'SOL'],
         cycle_interval_minutes=[20, 35],
     )
@@ -52,7 +52,7 @@ def test_build_cycle_directive_enters_overflow_after_daily_completion(monkeypatc
     monkeypatch.setattr("src.runtime.cycle_policy.is_reply_limited", lambda agent_id: False)
 
     agent = make_agent(
-        'aisama',
+        'example_macro',
         market_symbols=['BTC', 'ETH', 'SOL'],
         cycle_interval_minutes=[20, 35],
     )

@@ -6,15 +6,15 @@ from src.runtime.agent_plan import AgentPlan, AgentAction
 
 
 def test_agent_stagger_offset_deterministic():
-    offset1 = _agent_stagger_offset("aisama")
-    offset2 = _agent_stagger_offset("aisama")
+    offset1 = _agent_stagger_offset("example_macro")
+    offset2 = _agent_stagger_offset("example_macro")
     assert offset1 == offset2
     assert 0 <= offset1 < 300
 
 
 def test_different_agents_get_different_offsets():
-    offset_a = _agent_stagger_offset("aisama")
-    offset_b = _agent_stagger_offset("sweetdi")
+    offset_a = _agent_stagger_offset("example_macro")
+    offset_b = _agent_stagger_offset("example_altcoin")
     assert offset_a != offset_b
 
 

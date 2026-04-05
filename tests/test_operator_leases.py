@@ -24,21 +24,21 @@ async def db_path(tmp_path):
 
 @pytest.mark.asyncio
 async def test_acquire_lease_success(db_path):
-    result = await acquire_lease(db_path, agent_id="aisama", holder_id="op-1", ttl_sec=60)
+    result = await acquire_lease(db_path, agent_id="example_macro", holder_id="op-1", ttl_sec=60)
     assert result is True
 
 
 @pytest.mark.asyncio
 async def test_acquire_lease_conflict(db_path):
-    await acquire_lease(db_path, agent_id="aisama", holder_id="op-1", ttl_sec=60)
-    result = await acquire_lease(db_path, agent_id="aisama", holder_id="op-2", ttl_sec=60)
+    await acquire_lease(db_path, agent_id="example_macro", holder_id="op-1", ttl_sec=60)
+    result = await acquire_lease(db_path, agent_id="example_macro", holder_id="op-2", ttl_sec=60)
     assert result is False
 
 
 @pytest.mark.asyncio
 async def test_same_holder_can_reacquire(db_path):
-    await acquire_lease(db_path, agent_id="aisama", holder_id="op-1", ttl_sec=60)
-    result = await acquire_lease(db_path, agent_id="aisama", holder_id="op-1", ttl_sec=60)
+    await acquire_lease(db_path, agent_id="example_macro", holder_id="op-1", ttl_sec=60)
+    result = await acquire_lease(db_path, agent_id="example_macro", holder_id="op-1", ttl_sec=60)
     assert result is True
 
 
@@ -50,33 +50,33 @@ async def test_expired_lease_can_be_taken(db_path):
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
             "INSERT INTO operator_leases (agent_id, holder_id, acquired_at, heartbeat_at, expires_at) VALUES (?, ?, ?, ?, ?)",
-            ("aisama", "op-dead", expired.isoformat(), expired.isoformat(), expired.isoformat()),
+            ("example_macro", "op-dead", expired.isoformat(), expired.isoformat(), expired.isoformat()),
         )
         await db.commit()
 
-    result = await acquire_lease(db_path, agent_id="aisama", holder_id="op-new", ttl_sec=60)
+    result = await acquire_lease(db_path, agent_id="example_macro", holder_id="op-new", ttl_sec=60)
     assert result is True
 
 
 @pytest.mark.asyncio
 async def test_heartbeat_extends_ttl(db_path):
-    await acquire_lease(db_path, agent_id="aisama", holder_id="op-1", ttl_sec=60)
-    result = await heartbeat_lease(db_path, agent_id="aisama", holder_id="op-1", ttl_sec=120)
+    await acquire_lease(db_path, agent_id="example_macro", holder_id="op-1", ttl_sec=60)
+    result = await heartbeat_lease(db_path, agent_id="example_macro", holder_id="op-1", ttl_sec=120)
     assert result is True
 
 
 @pytest.mark.asyncio
 async def test_heartbeat_wrong_holder_fails(db_path):
-    await acquire_lease(db_path, agent_id="aisama", holder_id="op-1", ttl_sec=60)
-    result = await heartbeat_lease(db_path, agent_id="aisama", holder_id="op-wrong", ttl_sec=120)
+    await acquire_lease(db_path, agent_id="example_macro", holder_id="op-1", ttl_sec=60)
+    result = await heartbeat_lease(db_path, agent_id="example_macro", holder_id="op-wrong", ttl_sec=120)
     assert result is False
 
 
 @pytest.mark.asyncio
 async def test_release_lease(db_path):
-    await acquire_lease(db_path, agent_id="aisama", holder_id="op-1", ttl_sec=60)
-    await release_lease(db_path, agent_id="aisama", holder_id="op-1")
-    holder = await get_lease_holder(db_path, "aisama")
+    await acquire_lease(db_path, agent_id="example_macro", holder_id="op-1", ttl_sec=60)
+    await release_lease(db_path, agent_id="example_macro", holder_id="op-1")
+    holder = await get_lease_holder(db_path, "example_macro")
     assert holder is None
 
 
@@ -97,8 +97,8 @@ async def test_cleanup_expired(db_path):
 
 @pytest.mark.asyncio
 async def test_get_lease_holder(db_path):
-    await acquire_lease(db_path, agent_id="aisama", holder_id="op-1", ttl_sec=60)
-    holder = await get_lease_holder(db_path, "aisama")
+    await acquire_lease(db_path, agent_id="example_macro", holder_id="op-1", ttl_sec=60)
+    holder = await get_lease_holder(db_path, "example_macro")
     assert holder == "op-1"
 
 

@@ -30,13 +30,13 @@ None.
    The test files only cover directive loading/parsing and prompt template formatting. The actual subprocess spawning logic (timeout handling, returncode checks, FileNotFoundError) is not unit-tested. The `test_operator_strategic_flow.py` tests mock the entire function. A unit test that mocks `asyncio.create_subprocess_exec` would improve coverage of the timeout/kill paths.
 
 4. **`_find_latest_context_summary` relies on lexicographic sort of filenames.**
-   `strategic_bridge.py:49` uses `sorted(..., reverse=True)` on glob results. This works correctly only if filenames are zero-padded ISO timestamps (`20260404T120000Z_aisama.md`). If any file breaks this pattern (e.g., extra prefix), the "latest" heuristic fails silently. Not a bug today, but fragile.
+   `strategic_bridge.py:49` uses `sorted(..., reverse=True)` on glob results. This works correctly only if filenames are zero-padded ISO timestamps (`20260404T120000Z_example_macro.md`). If any file breaks this pattern (e.g., extra prefix), the "latest" heuristic fails silently. Not a bug today, but fragile.
 
 5. **Plan step ordering discrepancy with plan document.**
    The plan (`humble-purring-riddle.md`, Stage 3) describes the flow as: `prepare -> compile -> strategize -> plan -> author -> execute -> reflect`. The actual implementation in `loop.py:185` is: `compile -> strategize -> prepare -> author -> audit -> execute -> reflect`. The reordering is correct (compile must precede strategize so the briefing packet is ready), but the plan document is now stale and should be updated.
 
 6. **Pre-existing test failures in `test_agent_config.py` (2 tests).**
-   `test_load_active_agent` and `test_load_sweetdi_agent_config` fail on `cycle_interval_minutes` assertion. These are not caused by Stage 3 changes but indicate config values were changed without updating test expectations.
+   `test_load_active_agent` and `test_load_example_altcoin_agent_config` fail on `cycle_interval_minutes` assertion. These are not caused by Stage 3 changes but indicate config values were changed without updating test expectations.
 
 ## Checklist results
 

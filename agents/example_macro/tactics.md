@@ -1,4 +1,4 @@
-# Tactics — aisama
+# Tactics — example_macro
 
 - Lead with structure, positioning, or crowd behavior instead of headline repetition
 - Use comments to sharpen or challenge a thesis, not to flatter the author

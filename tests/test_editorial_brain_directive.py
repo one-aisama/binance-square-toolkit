@@ -36,7 +36,7 @@ def _make_directive(**overrides):
 
 
 def test_skip_families_penalty():
-    agent = make_agent("aisama")
+    agent = make_agent("example_macro")
     brain = EditorialBrain(agent=agent, policy=agent._policy)
     context = DummyContext(
         feed_posts=[DummyPost("1", "alice", "$BTC macro read")],
@@ -63,7 +63,7 @@ def test_skip_families_penalty():
 
 
 def test_preferred_coins_boost_symbol_score():
-    agent = make_agent("aisama")
+    agent = make_agent("example_macro")
     brain = EditorialBrain(agent=agent, policy=agent._policy)
     context = DummyContext(
         market_data={
@@ -96,7 +96,7 @@ def test_preferred_coins_boost_symbol_score():
 
 
 def test_avoid_coins_filtered_from_candidates():
-    agent = make_agent("aisama")
+    agent = make_agent("example_macro")
     brain = EditorialBrain(agent=agent, policy=agent._policy)
     context = DummyContext(
         market_data={
@@ -121,7 +121,7 @@ def test_avoid_coins_filtered_from_candidates():
 
 
 def test_preferred_coins_reorder_candidates():
-    agent = make_agent("aisama")
+    agent = make_agent("example_macro")
     brain = EditorialBrain(agent=agent, policy=agent._policy)
     context = DummyContext(
         market_data={

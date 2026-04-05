@@ -1,4 +1,4 @@
-# Persona Policy: sweetdi
+# Persona Policy: example_altcoin
 # Altcoin operator — rotation, listings, sector breakouts, compact style
 
 family_score_adjustments:
@@ -150,7 +150,7 @@ stages:
     avoid_primary_symbols: ["BTC", "ETH"]
     article_policy: "disabled"
     style_notes:
-      - "sound sharper and more coin-specific than aisama"
+      - "sound sharper and more coin-specific than example_macro"
       - "avoid trailing periods at the end of paragraphs or the full post"
       - "prefer shorter posts with one decisive angle and lighter hashtag usage"
     source_notes:

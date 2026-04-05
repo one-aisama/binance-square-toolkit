@@ -14,14 +14,14 @@ def test_daily_plan_resets_when_local_day_changes(tmp_path):
     targets = {'like': 4, 'comment': 2, 'post': 1}
 
     first_state = load_daily_plan_state(
-        'sweetdi',
+        'example_altcoin',
         targets=targets,
         timezone_name='UTC',
         current_time=datetime(2026, 3, 30, 8, 0, tzinfo=timezone.utc),
         path=path,
     )
     update_daily_plan_state(
-        'sweetdi',
+        'example_altcoin',
         [{'action': 'like', 'success': True, 'response': {'success': True}}],
         targets=targets,
         timezone_name='UTC',
@@ -29,7 +29,7 @@ def test_daily_plan_resets_when_local_day_changes(tmp_path):
         path=path,
     )
     second_state = load_daily_plan_state(
-        'sweetdi',
+        'example_altcoin',
         targets=targets,
         timezone_name='UTC',
         current_time=datetime(2026, 3, 31, 8, 0, tzinfo=timezone.utc),
@@ -46,7 +46,7 @@ def test_daily_plan_marks_completion_and_remaining_targets(tmp_path):
     targets = {'like': 2, 'comment': 1, 'post': 1}
 
     state = update_daily_plan_state(
-        'aisama',
+        'example_macro',
         [
             {'action': 'like', 'success': True, 'response': {'success': True}},
             {'action': 'comment', 'success': True, 'response': {'commented': True, 'liked': True}},

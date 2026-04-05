@@ -11,7 +11,7 @@ Claude Code или Codex сессия — это **оператор**. Она п
 
 | Роль | Что делает | Кто |
 |------|-----------|-----|
-| **persona-агент** | Работает на Binance Square: пишет посты, комменты, лайки, подписки. Сам генерирует текст | aisama (профиль 1), sweetdi (профиль 2) |
+| **persona-агент** | Работает на Binance Square: пишет посты, комменты, лайки, подписки. Сам генерирует текст | example_macro (профиль 1), example_altcoin (профиль 2) |
 | **auditor** | Валидирует план и контент перед публикацией | agents/auditor/ |
 | **supervisor** | Мониторинг, коучинг, обзор поведения всех persona-агентов | agents/supervisor/ |
 
@@ -68,8 +68,8 @@ prepare (context → plan → audit) → АГЕНТ ПИШЕТ ТЕКСТ → ex
 
 | Агент | Профиль | Фокус | Файлы |
 |-------|---------|-------|-------|
-| **aisama** | 1 | BTC/ETH, макро, рыночная структура | `agents/aisama/`, `config/persona_policies/aisama.yaml` |
-| **sweetdi** | 2 | Альткоины, листинги, ротация секторов | `agents/sweetdi/`, `config/persona_policies/sweetdi.yaml` |
+| **example_macro** | 1 | BTC/ETH, макро, рыночная структура | `agents/example_macro/`, `config/persona_policies/example_macro.yaml` |
+| **example_altcoin** | 2 | Альткоины, листинги, ротация секторов | `agents/example_altcoin/`, `config/persona_policies/example_altcoin.yaml` |
 | *(новые)* | 3-6 | Добавляются по мере отладки | YAML + папка в agents/ |
 
 Каждый persona-агент состоит из:
@@ -184,5 +184,5 @@ Persona-агент участвует в трёх местах каждого mi
 - 390 тестов зелёные
 - 29 runtime модулей
 - 14 SQLite таблиц (10 runtime + 4 operator)
-- 2 активные персоны (aisama, sweetdi)
+- 2 активные персоны (example_macro, example_altcoin)
 - Обновлено: 2026-04-04

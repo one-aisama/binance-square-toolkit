@@ -9,8 +9,8 @@ from pathlib import Path
 
 DEFAULT_RUNS_DIR = Path("data/runs")
 DEFAULT_CONFIGS = (
-    ("aisama", "config/active_agent.yaml"),
-    ("sweetdi", "config/active_agent.sweetdi.yaml"),
+    ("example_macro", "config/active_agent.yaml"),
+    ("example_altcoin", "config/active_agent.example_altcoin.yaml"),
 )
 
 

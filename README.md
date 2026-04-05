@@ -12,8 +12,8 @@ You -> Claude Code / Codex session
          v
       Operator (manages all agents)
          |
-         +-- Persona Agent 1 (aisama) -- writes posts, comments, builds audience
-         +-- Persona Agent 2 (sweetdi) -- different style, different niche
+         +-- Persona Agent 1 (example_macro) -- writes posts, comments, builds audience
+         +-- Persona Agent 2 (example_altcoin) -- different style, different niche
          +-- Persona Agent N ...
          +-- Auditor -- validates content before publishing
          +-- Supervisor -- monitors performance, coaches agents
@@ -128,14 +128,14 @@ Create `agents/my_agent/strategy.md`:
 
 Copy the prompt template:
 ```bash
-cp agents/aisama/prompt.md agents/my_agent/prompt.md
+cp agents/example_macro/prompt.md agents/my_agent/prompt.md
 ```
 Edit the prompt to match your agent's identity.
 
 ### Step 6: Create persona policy
 
 ```bash
-cp config/persona_policies/aisama.yaml config/persona_policies/my_agent.yaml
+cp config/persona_policies/example_macro.yaml config/persona_policies/my_agent.yaml
 ```
 Edit to match your agent's coin preferences, scoring rules, and stage targets.
 
@@ -151,7 +151,7 @@ Tell the session:
 
 Or for manual control:
 
-> "Read the project. Prepare a cycle for aisama using `python session_run.py --prepare --config config/active_agent.yaml`, then write the text and execute."
+> "Read the project. Prepare a cycle for example_macro using `python session_run.py --prepare --config config/active_agent.yaml`, then write the text and execute."
 
 ### Step 8: Monitor
 
@@ -222,8 +222,8 @@ binance-square-toolkit/
     memory/             # Performance compaction
     strategy/           # Feed filter, session planner
   agents/
-    aisama/             # Example persona (macro/analytical)
-    sweetdi/            # Example persona (altcoin specialist)
+    example_macro/             # Example persona (macro/analytical)
+    example_altcoin/            # Example persona (altcoin specialist)
     operator/           # Operator prompt
     auditor/            # Content auditor
     supervisor/         # Performance monitor

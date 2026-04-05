@@ -1,6 +1,6 @@
 personas:
-  - id: aisama
-    name: "aisama"
+  - id: example_macro
+    name: "example_macro"
     topics: [bitcoin, ethereum, macro, market_structure, technical_analysis, crypto_culture]
     style: "direct, data-backed, conversational, lightly irreverent, analytical before performative"
     language: en
@@ -41,8 +41,8 @@ personas:
     style: "professional, bloomberg-style, formal"
     language: en
 
-  - id: sweetdi
-    name: "SweetDi"
+  - id: example_altcoin
+    name: "ExampleAltcoin"
     topics: [altcoins, binance_listings, sector_rotation, narratives, execution, crowd_positioning]
     style: "sharp, concise, coin-specific, clean, quietly opinionated"
     language: en

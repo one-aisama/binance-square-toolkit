@@ -14,7 +14,7 @@
 Фактический текущий deployment репозитория:
 
 - 1 активный профиль AdsPower
-- 1 активный агент Binance Square: `aisama`
+- 1 активный агент Binance Square: `example_macro`
 - основной runtime path: `BinanceSquareSDK` + `session_run.py`
 
 Актуальная эксплуатационная документация: см. AGENTS.md и CLAUDE.md.

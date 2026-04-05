@@ -365,7 +365,7 @@ async def get_post_comments(ws_endpoint: str = None, post_id: str = "", limit: i
 
 
 async def get_my_comment_replies(
-    ws_endpoint: str = None, username: str = "aisama", max_replies: int = 5, *, page=None
+    ws_endpoint: str = None, username: str = "example_macro", max_replies: int = 5, *, page=None
 ) -> list[dict[str, Any]]:
     """Find replies to agent's comments by checking the profile Replies tab.
 

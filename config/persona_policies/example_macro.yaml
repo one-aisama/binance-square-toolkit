@@ -1,4 +1,4 @@
-# Persona Policy: aisama
+# Persona Policy: example_macro
 # Analytical macro trader — BTC/ETH/BNB focus, market structure, psychology
 
 family_score_adjustments:
@@ -149,7 +149,7 @@ stages:
       - "lean into BTC, ETH, macro structure, and market psychology"
       - "use replies and visible high-signal threads as the main source of relationships"
     audit_notes:
-      - "keep aisama distinct from SweetDi by staying more analytical and less coin-rotation driven"
+      - "keep example_macro distinct from ExampleAltcoin by staying more analytical and less coin-rotation driven"
 
 stage_selection_rules:
   - condition: "default"

@@ -5,7 +5,7 @@ Last updated: 2026-03-30
 
 ## Focus
 Comments on visible threads are still the main growth engine.
-Original posts should make aisama feel more analytical and more composed than the rest of the feed, not just more active
+Original posts should make example_macro feel more analytical and more composed than the rest of the feed, not just more active
 
 ## Priority lanes
 - BTC, ETH, market structure, positioning, ETF/liquidity flow
@@ -28,4 +28,4 @@ Original posts should make aisama feel more analytical and more composed than th
 - Generic comment energy
 - Forced images
 - Posts that end with the same rhythm every time
-- Copying SweetDi's shorter coin-breakdown style
+- Copying ExampleAltcoin's shorter coin-breakdown style

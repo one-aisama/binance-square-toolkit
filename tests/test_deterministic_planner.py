@@ -21,10 +21,10 @@ class DummyContext:
         self.news = news or []
 
 
-def test_sweetdi_plan_avoids_recent_self_coin_and_uses_chart_capture(monkeypatch):
+def test_example_altcoin_plan_avoids_recent_self_coin_and_uses_chart_capture(monkeypatch):
     monkeypatch.setattr("src.runtime.deterministic_planner.is_reply_limited", lambda agent_id: False)
 
-    generator = DeterministicPlanGenerator(agent=make_agent("sweetdi"))
+    generator = DeterministicPlanGenerator(agent=make_agent("example_altcoin"))
     context = DummyContext(
         feed_posts=[
             DummyPost("1", "altqueen", "$LINK still has the cleanest relative strength in this rotation", "preferred_alt:LINK,alt_rotation"),
@@ -76,8 +76,8 @@ def test_sweetdi_plan_avoids_recent_self_coin_and_uses_chart_capture(monkeypatch
     assert sum(1 for action in plan.actions if action.action == "comment" and action.follow) >= 1
 
 
-def test_aisama_post_has_editorial_metadata():
-    generator = DeterministicPlanGenerator(agent=make_agent("aisama"))
+def test_example_macro_post_has_editorial_metadata():
+    generator = DeterministicPlanGenerator(agent=make_agent("example_macro"))
     context = DummyContext(
         feed_posts=[
             DummyPost("1", "macrocat", "$BTC still looks fragile because liquidity has not improved", "macro_majors,macro_structure"),
@@ -118,7 +118,7 @@ def test_aisama_post_has_editorial_metadata():
 
 
 def test_comment_action_has_target_text_not_generated_text():
-    generator = DeterministicPlanGenerator(agent=make_agent("aisama"))
+    generator = DeterministicPlanGenerator(agent=make_agent("example_macro"))
     context = DummyContext(
         feed_posts=[
             DummyPost("1", "macrocat", "$BTC bounce has everyone calling the tape clean again", "macro_majors,macro_structure"),
@@ -152,7 +152,7 @@ def test_comment_action_has_target_text_not_generated_text():
 
 
 def test_comment_targets_skip_identity_threads():
-    generator = DeterministicPlanGenerator(agent=make_agent("aisama"))
+    generator = DeterministicPlanGenerator(agent=make_agent("example_macro"))
     context = DummyContext(
         feed_posts=[
             DummyPost("1", "macrocat", "$BTC reclaim only matters if liquidity keeps improving", "macro_majors,macro_structure"),
@@ -188,9 +188,9 @@ def test_comment_targets_skip_identity_threads():
     assert comment_targets == ["1", "3", "4"]
 
 
-def test_sweetdi_comment_targets_stay_on_alt_lane(monkeypatch):
+def test_example_altcoin_comment_targets_stay_on_alt_lane(monkeypatch):
     monkeypatch.setattr("src.runtime.deterministic_planner.is_reply_limited", lambda agent_id: False)
-    generator = DeterministicPlanGenerator(agent=make_agent("sweetdi"))
+    generator = DeterministicPlanGenerator(agent=make_agent("example_altcoin"))
     context = DummyContext(
         feed_posts=[
             DummyPost("1", "macrocat", "$BTC reclaim looks stronger if ETF flows improve", "deprioritized_macro"),
@@ -228,7 +228,7 @@ def test_sweetdi_comment_targets_stay_on_alt_lane(monkeypatch):
 
 
 def test_post_only_mode_rotates_away_from_recent_market_family():
-    generator = DeterministicPlanGenerator(agent=make_agent("aisama"))
+    generator = DeterministicPlanGenerator(agent=make_agent("example_macro"))
     context = DummyContext(
         feed_posts=[
             DummyPost("1", "macrocat", "$BTC bounce has everyone calling the tape clean again", "macro_majors,macro_structure"),
@@ -279,7 +279,7 @@ def test_post_only_mode_rotates_away_from_recent_market_family():
 
 
 def test_post_avoids_news_source_used_by_other_agent():
-    generator = DeterministicPlanGenerator(agent=make_agent("aisama"))
+    generator = DeterministicPlanGenerator(agent=make_agent("example_macro"))
     context = DummyContext(
         feed_posts=[
             DummyPost("1", "macrocat", "$BTC bounce has everyone calling the tape clean again", "macro_majors,macro_structure"),
@@ -351,5 +351,5 @@ def test_agent_action_requires_text_for_quote_repost():
 
 def test_planner_does_not_require_sdk():
     """Planner should work without SDK since agent writes text, not the planner."""
-    generator = DeterministicPlanGenerator(agent=make_agent("aisama"))
+    generator = DeterministicPlanGenerator(agent=make_agent("example_macro"))
     assert generator._sdk is None

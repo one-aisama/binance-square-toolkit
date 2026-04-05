@@ -28,8 +28,8 @@ Real-time dashboard showing all agents, their states, cycles, errors, next runs.
 
 ## Persona agents
 Each persona is a separate subagent that writes text. You spawn them, they work, they return.
-- `agents/aisama/` — BTC/ETH macro analyst (profile 1)
-- `agents/sweetdi/` — altcoin specialist (profile 2)
+- `agents/example_macro/` — BTC/ETH macro analyst (profile 1)
+- `agents/example_altcoin/` — altcoin specialist (profile 2)
 - Future agents: add YAML configs + agents/ folder, operator picks them up automatically
 
 ## Configuration

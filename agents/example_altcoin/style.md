@@ -1,7 +1,7 @@
-# Style Card: SweetDi
+# Style Card: ExampleAltcoin
 
 ## Core shape
-- Shorter and cleaner than aisama
+- Shorter and cleaner than example_macro
 - Usually 2 paragraphs, sometimes 1 if the hit is sharp enough
 - Less abstract, more coin-specific
 - Faster pacing and tighter wording

@@ -83,13 +83,13 @@ def build_growth_coaching(agent: str, notable: str, activity: dict[str, int]) ->
     if activity["comments"] == 0:
         coaching.append("Speed up first engagement. The account should reach visible threads faster instead of spending too much of the session in setup or parsing.")
 
-    if agent == "aisama":
+    if agent == "example_macro":
         coaching.append("Keep comments sharper and a bit more opinionated. The account already has enough data; the growth edge now is more personality and clearer disagreement.")
         coaching.append("Original posts should still use images or charts whenever possible. That remains one of the easiest visibility multipliers for this voice.")
         if "Follow & Reply" in notable:
             coaching.append("Use follow-driven replies selectively. Relationship building is useful, but too many auto-follows will dilute the account graph.")
-    elif agent == "sweetdi":
-        coaching.append("Keep SweetDi coin-specific. The strongest version of this account talks about Binance-traded alts, listings, rotation, and weak execution rather than generic BTC stress.")
+    elif agent == "example_altcoin":
+        coaching.append("Keep ExampleAltcoin coin-specific. The strongest version of this account talks about Binance-traded alts, listings, rotation, and weak execution rather than generic BTC stress.")
         coaching.append("Graph building matters right now. A new account with no network should earn a few strategic follows instead of behaving like a pure publishing bot.")
         if "get_my_comment_replies" in notable or "Replies" in notable:
             coaching.append("Do not waste the whole session in reply archaeology. This profile is still building visibility and should stay focused on live altcoin conversations.")
