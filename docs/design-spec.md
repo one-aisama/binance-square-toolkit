@@ -1,25 +1,25 @@
-# Binance Square Toolkit — Дизайн-спецификация
-Дата: 2026-04-03
-Статус: АКТУАЛЬНО (v3, policy-driven)
+# Binance Square Toolkit — Design Specification
+Date: 2026-04-03
+Status: CURRENT (v3, policy-driven)
 
-## Обзор
+## Overview
 
-SDK / тулкит для управления активностью на Binance Square через AdsPower профили.
-**Софт = руки. Агент = мозг. Runtime = координация.**
+SDK / toolkit for managing activity on Binance Square via AdsPower profiles.
+**Software = hands. Agent = brain. Runtime = coordination.**
 
-- Софт (SDK) выполняет действия: постинг, лайки, комменты, подписки
-- Агент (Claude session) принимает решения и генерирует контент
-- Runtime framework координирует: планирование, аудит, исполнение, метрики
+- Software (SDK) executes actions: posting, likes, comments, follows
+- Agent (Claude session) makes decisions and generates content
+- Runtime framework coordinates: planning, audit, execution, metrics
 
-Монетизация через Write to Earn (5% базовой торговой комиссии от читателей).
+Monetization via Write to Earn (5% base trading commission from readers).
 
-## Архитектура по слоям
+## Architecture by Layers
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │  Entry points: session_run.py / main.py             │
 ├─────────────────────────────────────────────────────┤
-│  Runtime framework (src/runtime/, 29 модулей)      │
+│  Runtime framework (src/runtime/, 29 modules)       │
 │  session_loop → planner → auditor → executor        │
 ├─────────────────────────────────────────────────────┤
 │  Data pipeline                                       │
@@ -34,86 +34,86 @@ SDK / тулкит для управления активностью на Binan
 ```
 
 ### Transport
-- **sdk.py** — единый фасад для агента: connect, create_post, comment, like, follow, feed, market data
-- **session/** — AdsPower CDP, browser_actions (publishing), browser_engage (engagement), browser_data (парсинг), harvester (credentials)
-- **bapi/** — httpx клиент к Binance bapi с retry и rate limit (30 RPM)
+- **sdk.py** — unified facade for the agent: connect, create_post, comment, like, follow, feed, market data
+- **session/** — AdsPower CDP, browser_actions (publishing), browser_engage (engagement), browser_data (parsing), harvester (credentials)
+- **bapi/** — httpx client for Binance bapi with retry and rate limit (30 RPM)
 
 ### Coordination
-- **topic_reservations** (SQLite) — кросс-агентная блокировка тем (coin+angle+source), TTL 2 часа
-- **post_registry** — реестр опубликованных постов (72-часовое окно) для overlap avoidance
+- **topic_reservations** (SQLite) — cross-agent topic locking (coin+angle+source), TTL 2 hours
+- **post_registry** — registry of published posts (72-hour window) for overlap avoidance
 
-### Runtime framework
-Автономный цикл агента:
-1. **SessionContextBuilder** → сбор контекста (рынок, новости, TA, фид, реплаи)
-2. **CyclePolicy** → выбор stage (bootstrap / default / overflow / reply_limited)
-3. **DeterministicPlanGenerator** → JSON план (comment, like, follow, post) без LLM
-4. **EditorialBrain** → brief для поста (family, coin, angle, hooks, insights)
-5. **Агент** (Claude Code сессия) → пишет текст сам, используя brief_context и свои файлы
-6. **PlanAuditor** → детерминированная валидация (8 слоёв: стиль, дубликаты, overlap, reservations)
-7. **PlanExecutor** → исполнение через SDK + VisualPipeline (картинки)
+### Runtime Framework
+Autonomous agent cycle:
+1. **SessionContextBuilder** → context collection (market, news, TA, feed, replies)
+2. **CyclePolicy** → stage selection (bootstrap / default / overflow / reply_limited)
+3. **DeterministicPlanGenerator** → JSON plan (comment, like, follow, post) without LLM
+4. **EditorialBrain** → brief for the post (family, coin, angle, hooks, insights)
+5. **Agent** (Claude Code session) → writes text itself, using brief_context and its own files
+6. **PlanAuditor** → deterministic validation (8 layers: style, duplicates, overlap, reservations)
+7. **PlanExecutor** → execution via SDK + VisualPipeline (images)
 8. **Commit** → daily_plan, post_registry, topic_reservation, journal
 
 ### Policy (per-agent)
-- **persona_policies/{agent_id}.yaml** — все behavioral параметры: content mix, coin bias, angle rules, stages, audit style, comment stance, feed scoring
+- **persona_policies/{agent_id}.yaml** — all behavioral parameters: content mix, coin bias, angle rules, stages, audit style, comment stance, feed scoring
 - **active_agent.{agent_id}.yaml** — runtime binding: AdsPower profile, symbols, session limits, visual config
 - **accounts/{agent_id}.yaml** — daily limits, proxy, credentials
 
-### Data pipeline
-- **metrics/** — store (SQLite), collector (отложенный сбор outcomes 6h+), scorer (агрегация insights + auto-lessons)
-- **memory/** — compactor: генерация performance.md, relationships.md из insights
-- **strategy/** — analyst (обновление strategy.md), reviewer (session stats + journal), feed_filter (спам-фильтр)
-- **pipeline.py** — оркестрация: collector → scorer → compactor → analyst
+### Data Pipeline
+- **metrics/** — store (SQLite), collector (deferred outcome collection 6h+), scorer (insight aggregation + auto-lessons)
+- **memory/** — compactor: generates performance.md, relationships.md from insights
+- **strategy/** — analyst (updates strategy.md), reviewer (session stats + journal), feed_filter (spam filter)
+- **pipeline.py** — orchestration: collector → scorer → compactor → analyst
 
 ### State (per-agent files)
 - `data/runtime/{agent_id}/` — checkpoint.json, daily_plan.json, status.json
-- `data/generated_visuals/{agent_id}/` — AI-сгенерированные картинки
+- `data/generated_visuals/{agent_id}/` — AI-generated images
 - `agents/{agent_id}/` — identity, style, strategy, lessons, journal, performance, relationships
 
 ## Hybrid Transport (httpx + Playwright CDP)
 
-- **httpx** — парсинг (лента, статьи, тренды, рыночные данные), лайки. Быстро, без браузера.
-- **Playwright CDP** — постинг, комментирование, репосты, подписки. Требуется client-side signature.
-- **Credentials** — захватываются через CDP, хранятся в SQLite (зашифрованы), используются httpx.
+- **httpx** — parsing (feed, articles, trends, market data), likes. Fast, no browser.
+- **Playwright CDP** — posting, commenting, reposts, follows. Requires client-side signature.
+- **Credentials** — captured via CDP, stored in SQLite (encrypted), used by httpx.
 
-## Карта модулей
+## Module Map
 
-| Модуль | Путь | Назначение |
-|--------|------|------------|
-| sdk | src/sdk.py | Единый фасад для агента |
+| Module | Path | Purpose |
+|--------|------|---------|
+| sdk | src/sdk.py | Unified facade for the agent |
 | session | src/session/ | AdsPower, CDP, browser actions/data, web authoring |
-| bapi | src/bapi/ | httpx клиент к Binance bapi |
-| parser | src/parser/ | Парсинг фида, статей, тренды |
-| content | src/content/ | AI-генерация, валидация, market data, news, TA |
-| activity | src/activity/ | Лайки, комменты, репосты (оркестрация) |
-| runtime | src/runtime/ | 29 модулей: планирование, аудит, исполнение, guard |
+| bapi | src/bapi/ | httpx client for Binance bapi |
+| parser | src/parser/ | Feed parsing, articles, trends |
+| content | src/content/ | AI generation, validation, market data, news, TA |
+| activity | src/activity/ | Likes, comments, reposts (orchestration) |
+| runtime | src/runtime/ | 29 modules: planning, audit, execution, guard |
 | metrics | src/metrics/ | MetricsStore, Collector, Scorer |
 | memory | src/memory/ | Compactor (performance.md, relationships.md) |
 | strategy | src/strategy/ | Planner, Analyst, Reviewer, FeedFilter |
-| pipeline | src/pipeline.py | Оркестрация data pipeline |
-| accounts | src/accounts/ | YAML конфиги, лимиты, анти-детект |
-| db | src/db/ | SQLite схема (10 таблиц), инициализация |
+| pipeline | src/pipeline.py | Data pipeline orchestration |
+| accounts | src/accounts/ | YAML configs, limits, anti-detect |
+| db | src/db/ | SQLite schema (10 tables), initialization |
 
-## База данных (SQLite + WAL mode)
+## Database (SQLite + WAL mode)
 
-10 таблиц: credentials, actions_log, daily_stats, parsed_trends, parsed_posts, discovered_endpoints, post_tracker, topic_reservations, comment_locks, news_cooldowns.
+10 tables: credentials, actions_log, daily_stats, parsed_trends, parsed_posts, discovered_endpoints, post_tracker, topic_reservations, comment_locks, news_cooldowns.
 
-YAML — источник истины для конфигов. SQLite хранит runtime-данные.
+YAML is the source of truth for configs. SQLite stores runtime data.
 
-## Добавление нового агента
+## Adding a New Agent
 
 1. `config/persona_policies/{id}.yaml` — behavioral policy
 2. `config/active_agent.{id}.yaml` — runtime binding (AdsPower, symbols, visual)
-3. `config/accounts/{id}.yaml` — account credentials и daily limits
+3. `config/accounts/{id}.yaml` — account credentials and daily limits
 4. `agents/{id}/` — identity.md, style.md, strategy.md, prompt.md, visual_profile.md
-5. Ноль изменений в Python коде
+5. Zero changes to Python code
 
-## Известные ограничения
+## Known Limitations
 
-1. **create_post() confirmation** — подтверждение публикации через network response (`content/add`). При отсутствии — `publish_unconfirmed`. Нужен robust fallback (composer cleared, success toast, URL change).
-2. **BapiClient stubs** — `comment_post()`, `repost()`, `create_post()` через httpx — stubs (NotImplementedError). Реальный путь: browser_actions (CDP).
-3. **Селекторы** — CSS-селекторы в page_map.py хрупкие. Обновления UI Binance Square могут сломать.
+1. **create_post() confirmation** — publish confirmation via network response (`content/add`). If absent — `publish_unconfirmed`. Needs robust fallback (composer cleared, success toast, URL change).
+2. **BapiClient stubs** — `comment_post()`, `repost()`, `create_post()` via httpx — stubs (NotImplementedError). Real path: browser_actions (CDP).
+3. **Selectors** — CSS selectors in page_map.py are fragile. Binance Square UI updates can break them.
 
-## Зависимости
+## Dependencies
 
 ```
 httpx>=0.27

@@ -1,36 +1,36 @@
-# Модуль: scheduler
-# Назначение: опциональная оркестрация пайплайнов по расписанию (агент может управлять таймингом напрямую)
-# Спецификация: отдельная спека отсутствует (см. docs/design-spec.md, раздел планировщик)
+# Module: scheduler
+# Purpose: optional pipeline orchestration on a schedule (the agent can manage timing directly)
+# Specification: no dedicated spec (see docs/design-spec.md, scheduler section)
 
-## Файлы
-| Файл | Строк | Что делает |
-|------|-------|------------|
-| scheduler.py | 304 | CycleScheduler — APScheduler обёртка, запуск пайплайнов по аккаунтам |
+## Files
+| File | Lines | What it does |
+|------|-------|--------------|
+| scheduler.py | 304 | CycleScheduler — APScheduler wrapper, runs pipelines per account |
 
-## Зависимости
-- Использует: все остальные модули (session, bapi, parser, content, activity, accounts, db)
-- Entry point: `src/main.py` конструирует и запускает CycleScheduler
+## Dependencies
+- Uses: all other modules (session, bapi, parser, content, activity, accounts, db)
+- Entry point: `src/main.py` constructs and starts CycleScheduler
 
-## Ключевые функции
-- `CycleScheduler(settings, accounts, db_path)` — создаёт CredentialStore + ActionLimiter
-- `CycleScheduler.start()` — запуск APScheduler, первый цикл через 5с если `first_run_immediate: true`
-- `CycleScheduler.stop()` — остановка
-- `_run_cycle()` — итерация по аккаунтам, вызов `_process_account()`
-- `_process_account(account)` — пайплайн: валидация creds, парсинг, генерация, публикация, активность
+## Key Functions
+- `CycleScheduler(settings, accounts, db_path)` — creates CredentialStore + ActionLimiter
+- `CycleScheduler.start()` — starts APScheduler, first cycle in 5s if `first_run_immediate: true`
+- `CycleScheduler.stop()` — shutdown
+- `_run_cycle()` — iterates over accounts, calls `_process_account()`
+- `_process_account(account)` — pipeline: validate creds, parse, generate, publish, activity
 - `_refresh_credentials(account)` — AdsPower start, harvest, save, stop
-- `_generate_content(account, topics, bapi_client)` — выбор тем, market data, постановка в очередь
+- `_generate_content(account, topics, bapi_client)` — selects topics, market data, queues content
 - `_run_activity(account, posts, bapi_client)` — ActivityExecutor + run_cycle
 
-## Роль в системе
-Scheduler опционален. Он выполняет заданные пайплайны по таймеру, но не принимает творческих решений.
-Агент (Claude/Codex) может заменить scheduler полностью, вызывая функции софта напрямую.
+## Role in the System
+The scheduler is optional. It runs predefined pipelines on a timer but makes no creative decisions.
+The agent (Claude/Codex) can fully replace the scheduler by calling software functions directly.
 
-## Типичные задачи
-- Изменить частоту циклов: `cycle_interval_hours` в settings YAML
-- Добавить шаг пайплайна: метод `_do_step()`, вызов в `_process_account()`
-- Отладить цикл: искать "CYCLE STARTED" / "CYCLE COMPLETED" в логах
+## Common Tasks
+- Change cycle frequency: `cycle_interval_hours` in settings YAML
+- Add a pipeline step: `_do_step()` method, call it in `_process_account()`
+- Debug a cycle: look for "CYCLE STARTED" / "CYCLE COMPLETED" in logs
 
-## Известные проблемы
-- Activity loop вызывает bapi comment/repost (заглушки) — логирует warning, продолжает
-- Publishing loop вызывает create_post (заглушка) — контент остаётся в очереди
-- Аккаунты обрабатываются последовательно, нет параллелизма
+## Known Issues
+- Activity loop calls bapi comment/repost (stubs) — logs a warning, continues
+- Publishing loop calls create_post (stub) — content stays in the queue
+- Accounts are processed sequentially, no parallelism

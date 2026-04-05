@@ -1,33 +1,33 @@
-# Модуль: parser
-# Назначение: получение постов из bapi, парсинг сырых ответов, ранжирование трендов по engagement
-# Спецификация: docs/specs/spec_parser.md
+# Module: parser
+# Purpose: fetching posts from bapi, parsing raw responses, ranking trends by engagement
+# Specification: docs/specs/spec_parser.md
 
-## Файлы
-| Файл | Строк | Что делает |
-|------|-------|------------|
-| fetcher.py | 114 | TrendFetcher — загрузка статей + фида через BapiClient, дедупликация по post_id |
-| aggregator.py | 59 | rank_topics() — группировка по хэштегу, скоринг: views*0.3 + likes*0.5 + comments*0.2 |
-| models.py | 32 | ParsedPost и Topic dataclasses |
+## Files
+| File | Lines | What it does |
+|------|-------|--------------|
+| fetcher.py | 114 | TrendFetcher — loads articles + feed via BapiClient, deduplication by post_id |
+| aggregator.py | 59 | rank_topics() — groups by hashtag, scoring: views*0.3 + likes*0.5 + comments*0.2 |
+| models.py | 32 | ParsedPost and Topic dataclasses |
 
-## Зависимости
-- Использует: `bapi.client` (BapiClient — все данные идут через него)
-- Используется: `content` (темы подаются в ContentGenerator)
-- Используется: `activity` (посты используются как таргеты)
-- Используется: `scheduler` (вызывает TrendFetcher.fetch_all + rank_topics)
+## Dependencies
+- Uses: `bapi.client` (BapiClient — all data goes through it)
+- Used by: `content` (topics are fed into ContentGenerator)
+- Used by: `activity` (posts are used as targets)
+- Used by: `scheduler` (calls TrendFetcher.fetch_all + rank_topics)
 
-## Ключевые функции
-- `TrendFetcher(client: BapiClient)` — конструктор
-- `TrendFetcher.fetch_all(article_pages=5, feed_pages=5)` — возвращает `list[ParsedPost]`
-- `TrendFetcher.fetch_fear_greed()` — возвращает dict
-- `TrendFetcher.fetch_hot_hashtags()` — возвращает список dict
-- `rank_topics(posts, top_n=10)` — возвращает `list[Topic]`
-- `compute_engagement(post)` — возвращает float score
+## Key Functions
+- `TrendFetcher(client: BapiClient)` — constructor
+- `TrendFetcher.fetch_all(article_pages=5, feed_pages=5)` — returns `list[ParsedPost]`
+- `TrendFetcher.fetch_fear_greed()` — returns dict
+- `TrendFetcher.fetch_hot_hashtags()` — returns list of dicts
+- `rank_topics(posts, top_n=10)` — returns `list[Topic]`
+- `compute_engagement(post)` — returns float score
 
-## Типичные задачи
-- Изменить формулу ранжирования: `compute_engagement()` в `aggregator.py`
-- Исправить парсинг bapi: `_extract_post()` в `fetcher.py` — обрабатывает вложенный `contentDetail`
-- Добавить источник данных: добавить метод в TrendFetcher, вызвать в `fetch_all()`
+## Common Tasks
+- Change ranking formula: `compute_engagement()` in `aggregator.py`
+- Fix bapi parsing: `_extract_post()` in `fetcher.py` — handles nested `contentDetail`
+- Add a data source: add a method to TrendFetcher, call it in `fetch_all()`
 
-## Известные проблемы
-- Структура ответов bapi различается между feed и article endpoints — `_extract_post()` пробует несколько путей
-- Посты без хэштегов (`_untagged`) исключаются из ранжирования тем
+## Known Issues
+- bapi response structure differs between feed and article endpoints — `_extract_post()` tries multiple paths
+- Posts without hashtags (`_untagged`) are excluded from topic ranking

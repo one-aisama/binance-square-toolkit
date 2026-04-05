@@ -1,27 +1,27 @@
-# Спецификация: Модуль Parser
+# Specification: Parser Module
 
-**Путь:** `src/parser/`
-**Файлы:** `fetcher.py`, `aggregator.py`, `models.py`
-
----
-
-## Описание
-
-Модуль Parser забирает сырой контент с Binance Square (посты и статьи через bapi, индекс страха/жадности, горячие хэштеги), нормализует его в типизированные dataclass-ы и ранжирует трендовые темы по engagement score. Его выходные данные — основной источник информации для пайплайна генерации контента: он показывает агенту, о чём говорит сообщество и какие темы набирают наибольшую тягу.
+**Path:** `src/parser/`
+**Files:** `fetcher.py`, `aggregator.py`, `models.py`
 
 ---
 
-## Пользовательские сценарии
+## Description
 
-- Как агент, я хочу получить все свежие посты из ленты и статьи одним вызовом, чтобы иметь единый список контента для анализа.
-- Как агент, я хочу, чтобы посты были дедуплицированы по post_id, чтобы не обрабатывать один и тот же контент дважды.
-- Как агент, я хочу, чтобы трендовые хэштеги были ранжированы по engagement score, чтобы выбирать тему с наибольшим сигналом для генерации контента.
-- Как агент, я хочу, чтобы индекс страха/жадности и популярные монеты загружались вместе с постами, чтобы учитывать рыночный сентимент при создании контента.
-- Как агент, я хочу, чтобы сырые данные bapi были нормализованы в типизированные dataclass-ы, чтобы нижестоящий код не парсил сырые словари.
+The Parser module fetches raw content from Binance Square (posts and articles via bapi, fear/greed index, hot hashtags), normalizes it into typed dataclasses, and ranks trending topics by engagement score. Its output is the primary information source for the content generation pipeline: it shows the agent what the community is talking about and which topics are gaining the most traction.
 
 ---
 
-## Модель данных
+## User Stories
+
+- As an agent, I want to get all fresh feed posts and articles in a single call, so I have a unified content list for analysis.
+- As an agent, I want posts to be deduplicated by post_id, so I don't process the same content twice.
+- As an agent, I want trending hashtags ranked by engagement score, so I can pick the topic with the strongest signal for content generation.
+- As an agent, I want the fear/greed index and popular coins loaded alongside posts, so I can account for market sentiment when creating content.
+- As an agent, I want raw bapi data normalized into typed dataclasses, so downstream code doesn't parse raw dicts.
+
+---
+
+## Data Model
 
 ### ParsedPost (`src/parser/models.py`)
 
@@ -55,7 +55,7 @@ class Topic:
     post_count: int = 0
 ```
 
-### Таблицы БД (записываются планировщиком/оркестратором, не самим модулем)
+### DB Tables (written by the scheduler/orchestrator, not the module itself)
 
 ```sql
 CREATE TABLE IF NOT EXISTS parsed_posts (
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS parsed_trends (
 );
 ```
 
-Модуль парсера возвращает Python-объекты; персистенция — ответственность вызывающего кода.
+The parser module returns Python objects; persistence is the caller's responsibility.
 
 ---
 
@@ -98,15 +98,15 @@ class TrendFetcher:
     def __init__(self, client: BapiClient)
 ```
 
-| Метод | Сигнатура | Возвращает |
-|-------|-----------|------------|
-| `fetch_all` | `(article_pages: int = 5, feed_pages: int = 5) -> list[ParsedPost]` | Дедуплицированный список ParsedPost |
-| `fetch_fear_greed` | `() -> dict` | Сырой dict из `BapiClient.get_fear_greed()` |
-| `fetch_hot_hashtags` | `() -> list[dict]` | Сырой список из `BapiClient.get_hot_hashtags()` |
-| `_fetch_articles` | `(pages: int = 5) -> list[ParsedPost]` | Приватный — загружает топ-статьи по N страницам |
-| `_fetch_feed` | `(pages: int = 5) -> list[ParsedPost]` | Приватный — загружает рекомендованную ленту по N страницам |
+| Method | Signature | Returns |
+|--------|-----------|---------|
+| `fetch_all` | `(article_pages: int = 5, feed_pages: int = 5) -> list[ParsedPost]` | Deduplicated list of ParsedPost |
+| `fetch_fear_greed` | `() -> dict` | Raw dict from `BapiClient.get_fear_greed()` |
+| `fetch_hot_hashtags` | `() -> list[dict]` | Raw list from `BapiClient.get_hot_hashtags()` |
+| `_fetch_articles` | `(pages: int = 5) -> list[ParsedPost]` | Private -- fetches top articles across N pages |
+| `_fetch_feed` | `(pages: int = 5) -> list[ParsedPost]` | Private -- fetches recommended feed across N pages |
 
-`fetch_all` вызывает `_fetch_articles` и `_fetch_feed`, объединяет результаты, дедуплицирует по `post_id` (статьи первые, лента вторая — при коллизии статьи имеют приоритет), и возвращает объединённый список.
+`fetch_all` calls `_fetch_articles` and `_fetch_feed`, merges results, deduplicates by `post_id` (articles first, feed second -- on collision articles take priority), and returns the combined list.
 
 ---
 
@@ -116,21 +116,21 @@ class TrendFetcher:
 def _extract_post(raw: dict[str, Any]) -> ParsedPost | None
 ```
 
-Функция уровня модуля. Нормализует сырой dict поста из bapi в `ParsedPost`. Возвращает `None`, если `post_id` не удаётся извлечь.
+Module-level function. Normalizes a raw bapi post dict into `ParsedPost`. Returns `None` if `post_id` cannot be extracted.
 
-Пути разрешения полей (пробует несколько ключей, т.к. структура ответа bapi отличается между лентой и статьями):
+Field resolution paths (tries multiple keys since bapi response structure differs between feed and articles):
 
-| Поле ParsedPost | Порядок поиска |
-|-----------------|----------------|
-| `post_id` | `contentDetail.id` → `contentDetail.contentId` |
-| `author_name` | `contentDetail.authorName` → `contentDetail.nickname` |
-| `author_id` | `contentDetail.authorId` → `contentDetail.userId` |
-| `card_type` | `contentDetail.cardType` → `contentDetail.type` |
-| `text_preview` | `contentDetail.title` → `contentDetail.text` (обрезается до 200) |
-| `hashtags` | `contentDetail.hashtagList[].name` или `hashtagName` или raw str |
-| `trading_pairs` | `contentDetail.tradingPairs[].symbol` или `name`; или `contentDetail.cashtagList` |
+| ParsedPost Field | Lookup Order |
+|------------------|--------------|
+| `post_id` | `contentDetail.id` -> `contentDetail.contentId` |
+| `author_name` | `contentDetail.authorName` -> `contentDetail.nickname` |
+| `author_id` | `contentDetail.authorId` -> `contentDetail.userId` |
+| `card_type` | `contentDetail.cardType` -> `contentDetail.type` |
+| `text_preview` | `contentDetail.title` -> `contentDetail.text` (truncated to 200) |
+| `hashtags` | `contentDetail.hashtagList[].name` or `hashtagName` or raw str |
+| `trading_pairs` | `contentDetail.tradingPairs[].symbol` or `name`; or `contentDetail.cashtagList` |
 
-Если в сыром dict нет обёртки `contentDetail`, используется сам dict.
+If the raw dict has no `contentDetail` wrapper, the dict itself is used.
 
 ---
 
@@ -139,59 +139,59 @@ def _extract_post(raw: dict[str, Any]) -> ParsedPost | None
 ```python
 def compute_engagement(post: ParsedPost) -> float
 ```
-Формула: `view_count * 0.3 + like_count * 0.5 + comment_count * 0.2`
+Formula: `view_count * 0.3 + like_count * 0.5 + comment_count * 0.2`
 
 ```python
 def rank_topics(posts: list[ParsedPost], top_n: int = 10) -> list[Topic]
 ```
 
-Группирует посты по хэштегу (нормализованному: lowercase, `#` убран). Накапливает `engagement_score` и `post_count` для каждого хэштега. Собирает `trading_pairs` для каждого хэштега в `set`. Сортирует по суммарному engagement по убыванию. Возвращает топ `top_n` Topic-ов.
+Groups posts by hashtag (normalized: lowercase, `#` stripped). Accumulates `engagement_score` and `post_count` for each hashtag. Collects `trading_pairs` for each hashtag into a `set`. Sorts by total engagement descending. Returns the top `top_n` Topics.
 
-Посты без хэштегов группируются под `"_untagged"` внутренне и исключаются из возвращаемого списка.
+Posts without hashtags are grouped under `"_untagged"` internally and excluded from the returned list.
 
 ---
 
-## Бизнес-логика
+## Business Logic
 
-### Пагинация
-`_fetch_articles` и `_fetch_feed` итерируют страницы от 1 до N включительно. Ошибка на странице (любое исключение от BapiClient) логируется как warning, итерация продолжается — возвращаются частичные данные вместо полного прерывания.
+### Pagination
+`_fetch_articles` and `_fetch_feed` iterate pages from 1 to N inclusive. An error on a page (any exception from BapiClient) is logged as a warning, iteration continues -- partial data is returned instead of a full abort.
 
-### Дедупликация
-В `fetch_all`: после конкатенации статей + постов из ленты используется `seen: set[str]` по значениям `post_id`. Побеждает первое вхождение. Поскольку статьи идут первыми в конкатенации, они имеют приоритет над дубликатами из ленты.
+### Deduplication
+In `fetch_all`: after concatenating articles + feed posts, a `seen: set[str]` is used on `post_id` values. First occurrence wins. Since articles come first in the concatenation, they take priority over feed duplicates.
 
-### Веса engagement score
+### Engagement Score Weights
 ```
-view_count   × 0.3  (охват)
-like_count   × 0.5  (прямое вовлечение — наибольший вес)
-comment_count × 0.2  (качество обсуждения)
+view_count   x 0.3  (reach)
+like_count   x 0.5  (direct engagement -- highest weight)
+comment_count x 0.2  (discussion quality)
 ```
-`share_count` не включён в формулу (присутствует в модели, но не используется в скоринге).
+`share_count` is not included in the formula (present in the model but not used in scoring).
 
-### Сбор монет для темы
-Каждая монета из `post.trading_pairs` добавляется в `set` для каждого хэштега этого поста. Итоговый `Topic.coins` — это `sorted(set)` для детерминированного вывода.
+### Coin Collection per Topic
+Each coin from `post.trading_pairs` is added to a `set` for each hashtag of that post. The final `Topic.coins` is `sorted(set)` for deterministic output.
 
-### Нормализация хэштегов
-`tag.lower().strip("#")` — убирает ведущий `#` и приводит к lowercase. Пустые теги после очистки пропускаются.
-
----
-
-## Крайние случаи
-
-| Ситуация | Ожидаемое поведение |
-|----------|---------------------|
-| BapiClient возвращает пустой список для страницы | Страница пропускается молча, пробуется следующая |
-| `_extract_post` не может найти post_id | Возвращает `None`, пост отбрасывается молча |
-| Все страницы упали (сеть недоступна) | `fetch_all` возвращает пустой список `[]` |
-| Пост без хэштегов | Считается в `"_untagged"` внутренне, исключается из вывода `rank_topics` |
-| `rank_topics([])` | Сразу возвращает `[]` |
-| Два поста с одинаковым post_id | Сохраняется первое вхождение (статьи перед лентой) |
-| `top_n` больше количества уникальных хэштегов | Возвращаются все доступные темы (меньше чем `top_n`) |
-| Источник `text_preview` слишком длинный | Обрезается до 200 символов через срез `[:200]` |
+### Hashtag Normalization
+`tag.lower().strip("#")` -- strips the leading `#` and lowercases. Empty tags after cleanup are skipped.
 
 ---
 
-## Приоритет и зависимости
+## Edge Cases
 
-- **Приоритет:** Высокий
-- **Зависит от:** `src/bapi/client.py` (BapiClient должен быть создан с валидными credentials перед парсингом)
-- **Блокирует:** `src/content/generator.py` (нужны Topic + market_data для генерации постов), `src/activity/target_selector.py` (нужен список ParsedPost для выбора целей)
+| Scenario | Expected Behavior |
+|----------|-------------------|
+| BapiClient returns an empty list for a page | Page skipped silently, next page is tried |
+| `_extract_post` cannot find post_id | Returns `None`, post is silently discarded |
+| All pages failed (network unavailable) | `fetch_all` returns an empty list `[]` |
+| Post without hashtags | Counted under `"_untagged"` internally, excluded from `rank_topics` output |
+| `rank_topics([])` | Immediately returns `[]` |
+| Two posts with the same post_id | First occurrence is kept (articles before feed) |
+| `top_n` is larger than the number of unique hashtags | All available topics are returned (fewer than `top_n`) |
+| `text_preview` source is too long | Truncated to 200 characters via `[:200]` slice |
+
+---
+
+## Priority and Dependencies
+
+- **Priority:** High
+- **Depends on:** `src/bapi/client.py` (BapiClient must be created with valid credentials before parsing)
+- **Blocks:** `src/content/generator.py` (needs Topic + market_data for post generation), `src/activity/target_selector.py` (needs ParsedPost list for target selection)
